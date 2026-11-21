@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="iro">
+  <title>iro</title>
+  <!-- Small app icon: a crest above the prompt. -->
+  <rect width="256" height="256" rx="48" fill="#071216"/>
+  <path fill="#19B5B8" d="M67.5 136.6L9.8 129.2L73.0 121.4ZM74.3 119.0L10.0 88.6L84.2 106.2ZM86.1 104.3L26.1 48.1L99.4 95.0ZM101.8 93.8L58.1 15.7L117.2 88.9ZM119.9 88.5L101.3 -1.7L136.1 88.5ZM138.8 88.9L147.8 -0.1L154.2 93.8ZM156.6 95.0L188.9 19.5L169.9 104.3ZM171.8 106.2L217.9 51.9L181.7 119.0ZM183.0 121.4L231.9 90.0L188.5 136.6Z"/>
+  <path fill="none" stroke="#19B5B8" stroke-width="10" stroke-linecap="round" d="M68.4 132.9A62 62 0 0 1 187.6 132.9"/>
+  <path fill="none" stroke="#E8F6F7" stroke-width="14" stroke-linecap="round" stroke-linejoin="round" d="M88 150l30 24-30 24"/>
+  <path fill="none" stroke="#FF4D6D" stroke-width="14" stroke-linecap="round" d="M134 200h36"/>
+</svg>
