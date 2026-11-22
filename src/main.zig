@@ -227,9 +227,9 @@ pub const Doc = struct {
         self.lock_path = null;
     }
 
-    pub fn name(self: *const Doc) []const u8 {
+    pub fn name(self: *const Doc, lang: iro.lang.Lang) []const u8 {
         if (self.path) |p| return std.fs.path.basename(p);
-        return self.title orelse "unbenannt";
+        return self.title orelse (if (lang == .en) "untitled" else "unbenannt");
     }
 
     /// Empty, unnamed, untouched: such a tab may be replaced when opening a
@@ -522,7 +522,7 @@ pub const App = struct {
     }
 
     pub fn fileName(self: *const App) []const u8 {
-        return self.d.name();
+        return self.d.name(self.lang);
     }
 
     // ───────────── Syntax colours ─────────────
@@ -1044,7 +1044,7 @@ pub const App = struct {
 
     fn sayForeign(self: *App) void {
         const pid = self.d.foreign orelse return;
-        const name = self.d.name();
+        const name = self.d.name(self.lang);
         if (pid != 0) {
             self.say(true, "Nur zum Lesen: {s} ist schon in iro PID {d} offen", "Read-only: {s} is already open in iro PID {d}", .{ name, pid });
         } else {
@@ -2002,7 +2002,7 @@ pub const App = struct {
                 }
                 if (self.docs.items.len > 1) {
                     for (self.docs.items, 0..) |doc, i| {
-                        const name = std.fmt.allocPrint(arena, "Gehe zu Tab: {s}", .{doc.name()}) catch break;
+                        const name = self.pickFmt(arena, "Gehe zu Tab: {s}", "Go to tab: {s}", .{doc.name(self.lang)});
                         const key = if (i < 9) std.fmt.allocPrint(arena, "Alt+{d}", .{i + 1}) catch "" else "";
                         list.append(arena, .{ .name = name, .key = key, .action = .{ .tab = i } }) catch break;
                     }
@@ -2065,7 +2065,7 @@ pub const App = struct {
         const versions = iro.history.list(arena, self.io, root, path) catch return false;
         if (versions.len == 0) {
             if (self.cfg.history) {
-                self.say(false, "Von {s} gibt es noch keine früheren Versionen", "There are no earlier versions of {s} yet", .{self.d.name()});
+                self.say(false, "Von {s} gibt es noch keine früheren Versionen", "There are no earlier versions of {s} yet", .{self.d.name(self.lang)});
             } else {
                 self.say(false, "Frühere Versionen sind ausgeschaltet (history = false)", "Earlier versions are switched off (history = false)", .{});
             }
@@ -2187,7 +2187,7 @@ pub const App = struct {
     }
 
     fn sayOutside(self: *App, kind: Outside, d: *Doc) void {
-        const name = d.name();
+        const name = d.name(self.lang);
         switch (kind) {
             .none => {},
             .reloaded => if (d == self.d) {
@@ -2246,7 +2246,7 @@ pub const App = struct {
             }
         }
         switch (self.reloadDoc(d)) {
-            .failed => self.say(true, "{s} lässt sich nicht laden", "{s} cannot be loaded", .{d.name()}),
+            .failed => self.say(true, "{s} lässt sich nicht laden", "{s} cannot be loaded", .{d.name(self.lang)}),
             .same => self.say(false, "Auf der Platte steht dasselbe wie bei dir", "The disk holds the same text as you", .{}),
             .replaced => if (kept) {
                 self.say(false, "Neu geladen. Dein Stand: {s} oder {s}", "Reloaded. Your text: {s} or {s}", .{ self.cfg.keyLabel(.undo), self.cfg.keyLabel(.history) });
@@ -2858,7 +2858,7 @@ pub const App = struct {
                     const lit = std.fmt.bufPrint(&msg_buf, "\"{s}\"", .{name}) catch return;
                     self.chosen.set(gpa, item.lua, lit) catch return self.sayOom();
                 }
-                self.commitChosen(std.fmt.bufPrint(&msg_buf, "Farbsatz: {s}", .{name}) catch "");
+                self.commitChosen(self.tr(&msg_buf, "Farbsatz: {s}", "Color scheme: {s}", .{name}));
             },
             .tab_width => {
                 const cur: isize = @intCast(self.cfg.tab_width);
@@ -2869,7 +2869,7 @@ pub const App = struct {
                     const lit = std.fmt.bufPrint(&msg_buf, "{d}", .{now}) catch return;
                     self.chosen.set(gpa, item.lua, lit) catch return self.sayOom();
                 }
-                self.commitChosen(std.fmt.bufPrint(&msg_buf, "Tab-Breite: {d}", .{now}) catch "");
+                self.commitChosen(self.tr(&msg_buf, "Tab-Breite: {d}", "Tab width: {d}", .{now}));
             },
             .indent => {
                 const now = iro.settings.cycleIndent(self.cfg.soft_tabs, dir);

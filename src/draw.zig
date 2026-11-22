@@ -755,7 +755,7 @@ fn drawPalette(self: *App, win: vaxis.Window, arena: Allocator) void {
             .commands => ui(self, "Befehl suchen …", "Search commands …"),
             .files => fileAsk(self, p, arena),
             .dirs => ui(self, "Ordner suchen (zoxide) …", "Search folders (zoxide) …"),
-            .versions => fmtL(self, arena, "Frühere Versionen von {s} …", "Earlier versions of {s} …", .{self.d.name()}),
+            .versions => fmtL(self, arena, "Frühere Versionen von {s} …", "Earlier versions of {s} …", .{self.d.name(self.lang)}),
         };
         _ = box.printSegment(.{ .text = ask, .style = .{ .bg = bg, .dim = true } }, .{ .col_offset = lead.col, .wrap = .none });
         box.showCursor(lead.col, 0);
@@ -1216,8 +1216,8 @@ fn drawTabs(self: *App, win: vaxis.Window, arena: Allocator) void {
     const spans = arena.alloc(TabSpan, docs.len) catch return;
     for (docs, 0..) |doc, i| {
         labels[i] = std.fmt.allocPrint(arena, " {s}{s}{s} ", .{
-            if (doc.path != null) iro.icons.forEntry(self.cfg.symbols, doc.name(), false, false) else "",
-            text.cleanName(arena, doc.name()),
+            if (doc.path != null) iro.icons.forEntry(self.cfg.symbols, doc.name(self.lang), false, false) else "",
+            text.cleanName(arena, doc.name(self.lang)),
             if (doc.ed.isModified()) " ●" else "",
         }) catch " ? ";
         widths[i] = win.gwidth(labels[i]);
