@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Mausmann. Additional terms (GPLv3 section 7) apply, see NOTICE.md.
 
-//! Config parachute: checks known system and dotfile configs before saving so
+//! Config Guard: checks known system and dotfile configs before saving so
 //! a typo in fstab, sudoers, sshd_config, systemd units, shell scripts or JSON
 //! is caught before it hits disk. For Hyprland configs, queries `hyprctl
 //! configerrors` right after saving.
@@ -325,7 +325,7 @@ test "detect matches known configs and respects shebangs" {
     try testing.expect(!isHyprConfig("/home/u/.config/kitty/kitty.conf"));
 }
 
-test "JSON parachute catches syntax errors with line numbers" {
+test "JSON Config Guard catches syntax errors with line numbers" {
     const gpa = testing.allocator;
     try testing.expect((try checkPreSave(gpa, testing.io, "ok.json", "{\"a\": [1, 2]}\n", .en)) == null);
 
@@ -335,7 +335,7 @@ test "JSON parachute catches syntax errors with line numbers" {
     try testing.expect(std.mem.indexOf(u8, bad.detail, "Line 3") != null);
 }
 
-test "shell parachute catches broken bash/sh syntax" {
+test "shell Config Guard catches broken bash/sh syntax" {
     const gpa = testing.allocator;
     try testing.expect((try checkPreSave(gpa, testing.io, "ok.sh", "#!/bin/sh\nif true; then echo hi; fi\n", .de)) == null);
 
@@ -345,7 +345,7 @@ test "shell parachute catches broken bash/sh syntax" {
     try testing.expect(std.mem.indexOf(u8, bad.detail, "iro-check-") == null);
 }
 
-test "fstab and sshd parachutes catch real errors and ignore non-root hostkey warnings" {
+test "fstab and sshd Config Guard catches real errors and ignores non-root hostkey warnings" {
     const gpa = testing.allocator;
     const io = testing.io;
 

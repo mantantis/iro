@@ -80,7 +80,7 @@ bleiben in beiden Gängen gleich.
 
 ### 🛟 Paranoid, wenn es um deine Daten geht
 
-- **Config-Fallschirm:** Bevor iro bekannte System- und Dotfile-Configs speichert
+- **Config Guard:** Bevor iro bekannte System- und Dotfile-Configs speichert
   (`fstab`, `sudoers`, `sshd_config`, `systemd`-Units, Shell-Skripte, JSON),
   prüft es den Entwurf mit dem passenden Werkzeug (`findmnt --verify`,
   `visudo -cf`, `sshd -t`, `systemd-analyze verify`, `bash -n`/`sh -n`,
@@ -200,7 +200,7 @@ kommentierte an. Änderungen gelten beim Speichern.
 
 ## Roadmap
 
-- **Config-Fallschirm v2:** automatischer Totmannschalter, der eine riskante
+- **Config Guard v2:** automatischer Totmannschalter, der eine riskante
   System-Config zurückrollt, wenn du sie nicht rechtzeitig bestätigst, plus
   atomares Speichern mit sudo.
 - **Ein komfortableres Forge:** Suche in Dateiinhalten und mehr von dem, was man

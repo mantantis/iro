@@ -78,7 +78,7 @@ Alt+G switches at any time, and the keys never change between gears.
 
 ### 🛟 Paranoid about your data
 
-- **Config parachute:** before saving known system and dotfile configs (`fstab`,
+- **Config Guard:** before saving known system and dotfile configs (`fstab`,
   `sudoers`, `sshd_config`, `systemd` units, shell scripts, JSON), iro checks
   the draft with the matching tool (`findmnt --verify`, `visudo -cf`, `sshd -t`,
   `systemd-analyze verify`, `bash -n`/`sh -n`, built-in JSON) and warns before
@@ -189,7 +189,7 @@ Changes apply on save.
 
 ## Roadmap
 
-- **Config parachute v2:** automatic dead-man's switch that rolls a risky system
+- **Config Guard v2:** automatic dead-man's switch that rolls a risky system
   config back if you don't confirm it in time, plus atomic sudo saving.
 - **A more comfortable Forge:** search across file contents and more of what you
   need to code all day without leaving the terminal.

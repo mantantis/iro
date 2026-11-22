@@ -106,7 +106,7 @@ const fixed = [_]Item{
         .de = "Vor jedem Speichern kommt der alte Stand in den Verlauf, die letzten 20 pro Datei. Alt+R holt ihn zurück. Geheimnisse bekommen keine Kopien.",
         .en = "Before every save the old state goes into the history, the last 20 per file. Alt+R brings it back. Secrets get no copies.",
     } },
-    .{ .kind = .toggle, .lua = "parachute", .label = .{ .de = "Config-Fallschirm", .en = "Config parachute" }, .say = .{
+    .{ .kind = .toggle, .lua = "config_guard", .label = .{ .de = "Config Guard", .en = "Config Guard" }, .say = .{
         .de = "Prüft bekannte Configs (fstab, sudoers, sshd, systemd, Shell, JSON, Hyprland) beim Speichern und warnt bei Fehlern.",
         .en = "Checks known configs (fstab, sudoers, sshd, systemd, shell, JSON, Hyprland) on save and warns on errors.",
     } },

@@ -1490,7 +1490,7 @@ fn drawStatus(self: *App, win: vaxis.Window, arena: Allocator) void {
             .confirm_trash => fmtL(self, arena, " {s} in den Papierkorb legen?  [J]a  [N]ein ", " Move {s} to the trash?  [Y]es  [N]o ", .{target}),
             .confirm_quit, .confirm_close => fmtL(self, arena, " Ungespeicherte Änderungen in {s}.  [S]peichern  [V]erwerfen  [A]bbrechen ", " Unsaved changes in {s}.  [S]ave  [D]iscard  [C]ancel ", .{self.fileName()}),
             .confirm_overwrite => ui(self, " Die Datei wurde außerhalb von iro geändert. Trotzdem überschreiben?  [J]a  [N]ein  [L]aden ", " The file was changed outside of iro. Overwrite anyway?  [Y]es  [N]o  [L]oad "),
-            .confirm_parachute => fmtL(self, arena, " Fallschirm ({s}): [J]a, trotzdem  [N]ein — {s} ", " Parachute ({s}): [Y]es, save anyway  [N]o — {s} ", .{ self.parachute_tool, self.parachute_err orelse "" }),
+            .confirm_guard => fmtL(self, arena, " Config Guard ({s}): [J]a, trotzdem  [N]ein — {s} ", " Config Guard ({s}): [Y]es, save anyway  [N]o — {s} ", .{ self.guard_tool, self.guard_err orelse "" }),
             .recover => ui(self, " Sicherung nach Absturz gefunden.  [W]iederherstellen  [V]erwerfen ", " Backup found after a crash.  [R]estore  [D]iscard "),
             .confirm_replace_file => fmtL(self, arena, " {s} gibt es schon. Ersetzen?  [J]a  [N]ein ", " {s} already exists. Replace it?  [Y]es  [N]o ", .{text.cleanName(arena, std.fs.path.basename(self.pending_save_as orelse ""))}),
             .replace_find => ui(self, " Ersetzen – suche: ", " Replace – find: "),

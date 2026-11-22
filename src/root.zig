@@ -25,7 +25,7 @@ pub const settings = @import("settings.zig");
 pub const index = @import("index.zig");
 pub const search = @import("search.zig");
 pub const history = @import("history.zig");
-pub const parachute = @import("parachute.zig");
+pub const guard = @import("guard.zig");
 
 pub const Buffer = buffer.Buffer;
 pub const Pos = buffer.Pos;
@@ -54,5 +54,5 @@ test {
     _ = index;
     _ = search;
     _ = history;
-    _ = parachute;
+    _ = guard;
 }

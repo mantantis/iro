@@ -758,7 +758,8 @@ pub const setting_aliases = [_]Alias{
     .{ .en = "brackets", .de = "klammern" },
     .{ .en = "esc_menu", .de = "esc_menue" },
     .{ .en = "history", .de = "versionen" },
-    .{ .en = "parachute", .de = "fallschirm" },
+    .{ .en = "config_guard", .de = "fallschirm" },
+    .{ .en = "config_guard", .de = "parachute" },
     .{ .en = "auto_gear", .de = "automatik" },
     .{ .en = "theme", .de = "thema" },
     .{ .en = "colors", .de = "farben" },
@@ -813,7 +814,7 @@ pub const bool_settings = [_]BoolSetting{
     .{ .lua = "brackets", .field = "brackets" },
     .{ .lua = "esc_menu", .field = "esc_menu" },
     .{ .lua = "history", .field = "history" },
-    .{ .lua = "parachute", .field = "parachute" },
+    .{ .lua = "config_guard", .field = "config_guard" },
     .{ .lua = "auto_gear", .field = "auto_gear" },
 };
 
@@ -880,9 +881,9 @@ pub const Config = struct {
     esc_menu: bool = true,
     /// Keep earlier versions of saved files (Alt+R brings them back).
     history: bool = true,
-    /// Check known system and dotfile configs before saving (fstab, sudoers,
-    /// sshd_config, systemd units, shell scripts, JSON, Hyprland).
-    parachute: bool = true,
+    /// Config Guard: check known system and dotfile configs before saving
+    /// (fstab, sudoers, sshd_config, systemd units, shell scripts, JSON, Hyprland).
+    config_guard: bool = true,
     theme: Theme = .{},
     /// Name of the selected theme (`theme`).
     theme_name: []const u8 = "terminal",
@@ -1383,9 +1384,9 @@ pub const default_init_lua_de =
     \\-- Dateien, die nur du lesen darfst, und Schlüssel bekommen nie Kopien.
     \\history = true
     \\
-    \\-- Config-Fallschirm: bekannte Configs (fstab, sudoers, sshd, systemd, Shell, JSON, Hyprland)
+    \\-- Config Guard: bekannte Configs (fstab, sudoers, sshd, systemd, Shell, JSON, Hyprland)
     \\-- beim Speichern prüfen und bei Fehlern warnen.
-    \\parachute = true
+    \\config_guard = true
     \\
     \\-- Optik. Alles einzeln abschaltbar (false).
     \\icons = true             -- Nerd-Font-Symbole in Baum, Tabs und Statuszeile
@@ -1485,9 +1486,9 @@ pub const default_init_lua_en =
     \\-- Files only you may read, and keys, never get copies.
     \\history = true
     \\
-    \\-- Config parachute: check known configs (fstab, sudoers, sshd, systemd, shell, JSON, Hyprland)
+    \\-- Config Guard: check known configs (fstab, sudoers, sshd, systemd, shell, JSON, Hyprland)
     \\-- on save and warn before writing broken syntax.
-    \\parachute = true
+    \\config_guard = true
     \\
     \\-- Looks. Each one can be switched off (false).
     \\icons = true             -- Nerd Font icons in the tree, tabs and status bar

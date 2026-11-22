@@ -588,11 +588,11 @@ ok "Search in Dokumente"             'screen | sed -n 4p | grep -q "Dokumente/Re
 keys Escape; keys C-q; sleep 0.3
 EXTRA_ENV=""
 
-echo "Config parachute (pre-save validation)"
+echo "Config Guard (pre-save validation)"
 printf '{"ok": true}\n' > "$E/check.json"
 start "$E/check.json"
 keys End; lit ' kaputt'; keys C-s; sleep 0.3
-ok "Broken JSON triggers parachute prompt" 'screen | tail -1 | grep -q "Fallschirm (JSON)" && screen | tail -1 | grep -qF "[J]a, trotzdem"'
+ok "Broken JSON triggers Config Guard prompt" 'screen | tail -1 | grep -q "Config Guard (JSON)" && screen | tail -1 | grep -qF "[J]a, trotzdem"'
 keys n; sleep 0.2
 ok "No cancels save, disk file intact" '[ "$(cat "$E/check.json")" = "{\"ok\": true}" ]'
 keys C-s; sleep 0.3; keys j; sleep 0.3
@@ -602,14 +602,14 @@ keys C-q; sleep 0.3
 printf '#!/bin/sh\nif true; then echo ok; fi\n' > "$E/check.sh"
 start "$E/check.sh"
 keys Down; keys End; keys BSpace; keys BSpace; keys BSpace; keys C-s; sleep 0.3
-ok "Broken shell script triggers parachute" 'screen | tail -1 | grep -q "Fallschirm (sh)"'
+ok "Broken shell script triggers Config Guard" 'screen | tail -1 | grep -q "Config Guard (sh)"'
 keys n; sleep 0.2; keys C-q; sleep 0.2; keys v; sleep 0.3
 
-mkdir -p "$XDG_CONFIG_HOME/iro"; printf 'parachute = false\n' > "$XDG_CONFIG_HOME/iro/init.lua"
+mkdir -p "$XDG_CONFIG_HOME/iro"; printf 'config_guard = false\n' > "$XDG_CONFIG_HOME/iro/init.lua"
 printf '{"ok": true}\n' > "$E/check2.json"
 start "$E/check2.json"
 keys End; lit ' kaputt'; keys C-s; sleep 0.3
-ok "parachute = false saves without prompt" 'grep -q "kaputt" "$E/check2.json" && screen | tail -1 | grep -q "Gespeichert"'
+ok "config_guard = false saves without prompt" 'grep -q "kaputt" "$E/check2.json" && screen | tail -1 | grep -q "Gespeichert"'
 keys C-q; sleep 0.3
 rm -f "$XDG_CONFIG_HOME/iro/init.lua"
 
