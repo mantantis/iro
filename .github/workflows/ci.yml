@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build & unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Lua 5.4
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends liblua5.4-dev pkg-config
+
+      - name: Set up Zig 0.17.1
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.17.1
+
+      - name: Run unit tests
+        run: zig build test --summary all
+
+      - name: Build binary (ReleaseSafe)
+        run: zig build
+
+      - name: Check CLI & binary weight budget
+        run: |
+          ./zig-out/bin/iro --version
+          ./zig-out/bin/iro --help >/dev/null
+          cp zig-out/bin/iro /tmp/iro-stripped
+          strip /tmp/iro-stripped
+          size=$(stat -c %s /tmp/iro-stripped)
+          echo "Stripped binary size: $size bytes ($((size / 1024)) KiB)"
+          if [ "$size" -gt 4194304 ]; then
+            echo "::error::Stripped binary exceeds 4 MiB budget ($size bytes)"
+            exit 1
+          fi
+
+  e2e:
+    name: End-to-end (tmux)
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            liblua5.4-dev pkg-config tmux libglib2.0-bin locales
+          sudo locale-gen de_DE.UTF-8
+
+      - name: Set up Zig 0.17.1
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.17.1
+
+      - name: Build binary
+        run: zig build
+
+      - name: Run end-to-end suite
+        run: tests/e2e.sh

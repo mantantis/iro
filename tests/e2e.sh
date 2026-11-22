@@ -14,6 +14,7 @@ IRO="${IRO:-$(cd "$(dirname "$0")/.." && pwd)/zig-out/bin/iro}"
 E="$(mktemp -d)"; export XDG_STATE_HOME="$E/state" XDG_CONFIG_HOME="$E/config"
 # For the trash test: a folder on the same disk as the home directory (/tmp has
 # no trash) with its own throwaway trash.
+mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}"
 T="$(mktemp -d -p "${XDG_CACHE_HOME:-$HOME/.cache}" iro-probelauf.XXXXXX)"
 trap 'tmux -L irotest kill-server 2>/dev/null; rm -rf "$E" "$T"' EXIT
 fails=0

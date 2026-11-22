@@ -5,13 +5,11 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 // iro is pinned to exactly one Zig release series. Zig regularly breaks
-// existing code between versions, so upgrades happen deliberately. Backup
-// archive of the matching version: ~/.local/share/iro/toolchain/
+// existing code between versions, so upgrades happen deliberately.
 comptime {
     const v = builtin.zig_version;
     if (v.major != 0 or v.minor != 17) {
-        @compileError("iro braucht Zig 0.17.x (gefunden: " ++ builtin.zig_version_string ++
-            "). Passendes Archiv liegt in ~/.local/share/iro/toolchain/");
+        @compileError("iro requires Zig 0.17.x (found: " ++ builtin.zig_version_string ++ ")");
     }
 }
 
@@ -23,7 +21,7 @@ pub fn build(b: *std.Build) void {
     const optimize = b.option(
         std.lang.Optimize,
         "optimize",
-        "Bau-Modus (Standard: safe)",
+        "Build mode (default: safe)",
     ) orelse .safe;
 
     const vaxis_dep = b.dependency("vaxis", .{ .target = target, .optimize = optimize });
@@ -58,7 +56,7 @@ pub fn build(b: *std.Build) void {
     exe.root_module.linkSystemLibrary("lua5.4", .{});
     b.installArtifact(exe);
 
-    const run_step = b.step("run", "iro starten");
+    const run_step = b.step("run", "Run iro");
     const run_cmd = b.addRunArtifact(exe);
     run_step.dependOn(&run_cmd.step);
     run_cmd.step.dependOn(b.getInstallStep());
@@ -66,6 +64,6 @@ pub fn build(b: *std.Build) void {
 
     const core_tests = b.addTest(.{ .root_module = core });
     const run_core_tests = b.addRunArtifact(core_tests);
-    const test_step = b.step("test", "Alle Tests ausführen");
+    const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_core_tests.step);
 }

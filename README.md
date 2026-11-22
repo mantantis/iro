@@ -9,6 +9,7 @@
 *A modeless terminal editor that looks good, stays out of your way and never loses your work.*
 
 ![Status](https://img.shields.io/badge/status-early%20alpha-orange)
+[![CI](https://github.com/mantantis/iro/actions/workflows/ci.yml/badge.svg)](https://github.com/mantantis/iro/actions/workflows/ci.yml)
 ![Zig](https://img.shields.io/badge/Zig-0.17-f7a41d?logo=zig&logoColor=white)
 ![Lua](https://img.shields.io/badge/config-Lua%205.4-2c2d72?logo=lua&logoColor=white)
 ![Platform](https://img.shields.io/badge/platform-Linux-informational?logo=linux&logoColor=white)
