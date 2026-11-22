@@ -497,7 +497,7 @@ keys C-w; sleep 0.3
 keys F9; sleep 0.25
 ok "F9: text still encrypted"     'screen | grep -q "Über iro" && ! screen | grep -q "Gebaut mit KI (Claude Code & Antigravity)"'
 sleep 1.5
-ok "F9: text settles afterwards"           'screen | grep -q "色  I R O" && screen | grep -q "Gebaut mit KI (Claude Code & Antigravity)" && screen | grep -q "Ko-fi folgt bald"'
+ok "F9: text settles afterwards"           'screen | grep -q "色  I R O" && screen | grep -q "Gebaut mit KI (Claude Code & Antigravity)" && screen | grep -q "ko-fi.com/mausmann"'
 keys x; sleep 0.3
 ok "Key closes About"         '! screen | grep -q "Über iro" && screen | sed -n 1p | grep -q "1 eins"'
 keys F9; sleep 0.1; keys x; sleep 0.2

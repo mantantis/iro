@@ -864,9 +864,7 @@ fn drawMenu(self: *App, win: vaxis.Window, arena: Allocator) void {
     const sel_bg = cardSelBg(self);
     const sig = [_]vaxis.Segment{
         .{ .text = "♥", .style = .{ .fg = pink } },
-        .{ .text = " Mausmann · ", .style = .{ .dim = true } },
-        .{ .text = "☕", .style = .{ .fg = pink } },
-        .{ .text = if (iro.about.kofi_url.len > 0) " Ko-fi" else ui(self, " Ko-fi folgt", " Ko-fi soon"), .style = .{ .dim = true }, .link = .{ .uri = iro.about.kofi_url } },
+        .{ .text = " Mausmann", .style = .{ .dim = true } },
     };
     // One blank row above and below, plus the border. When space runs short,
     // the padding goes first.

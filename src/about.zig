@@ -13,10 +13,8 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Lang = @import("lang.zig").Lang;
 
-/// Ko-fi address. Empty until Mausmann has an account; the card then says
-/// "coming soon". With an address, the line becomes a real link in kitty (OSC
-/// 8).
-pub const kofi_url: []const u8 = "";
+/// Ko-fi support link. Rendered as a clickable OSC 8 hyperlink in kitty.
+pub const kofi_url: []const u8 = "https://ko-fi.com/mausmann";
 
 pub const Kind = enum { title, subtitle, normal, dim, heart, coffee, legal, blank };
 pub const Line = struct { text: []const u8, kind: Kind };
@@ -26,9 +24,11 @@ pub const Line = struct { text: []const u8, kind: Kind };
 pub fn lines(arena: Allocator, version: []const u8, l: Lang) Allocator.Error![]const Line {
     const en = l == .en;
     const ver = try std.fmt.allocPrint(arena, "Version {s}", .{version});
-    const coffee = if (kofi_url.len > 0)
-        try std.fmt.allocPrint(arena, "{s}{s}", .{ if (en) "☕  Buy me a coffee: " else "☕  Kaffee spendieren: ", kofi_url })
-    else if (en) "☕  Buy me a coffee: Ko-fi coming soon" else "☕  Kaffee spendieren: Ko-fi folgt bald";
+    const kofi_short = if (std.mem.startsWith(u8, kofi_url, "https://")) kofi_url["https://".len..] else kofi_url;
+    const coffee = try std.fmt.allocPrint(arena, "{s}{s}", .{
+        if (en) "☕  Coffee & AI tokens: " else "☕  Kaffee & KI-Tokens: ",
+        kofi_short,
+    });
     const out = [_]Line{
         .{ .text = "色  I R O", .kind = .title },
         .{ .text = "Instant · Riced · Operator", .kind = .subtitle },

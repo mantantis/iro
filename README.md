@@ -205,6 +205,8 @@ tests/e2e.sh                   # end-to-end run in tmux (~4 minutes)
 Idea & design: **Mausmann**. Built with AI (Claude Code & Antigravity).
 Terminal rendering by [libvaxis](https://github.com/rockorager/libvaxis).
 
+Like iro? Tips go straight into coffee and AI tokens on [Ko-fi](https://ko-fi.com/mausmann).
+
 ## License
 
 `Copyright (C) 2026 Mausmann` · [GNU GPL v3.0 or later](LICENSE), with additional
