@@ -988,12 +988,12 @@ pub const Config = struct {
         if (std.mem.indexOf(u8, full, too_long_de) != null) {
             return self.setErr(gpa, "abgebrochen: " ++ too_long_de, "aborted: the config takes too long (endless loop?)", .{});
         }
-        const prefix = "[string \"init.lua\"]:";
-        if (std.mem.startsWith(u8, full, prefix)) {
-            self.setErr(gpa, "Zeile {s}", "Line {s}", .{full[prefix.len..]});
-        } else {
-            self.setErr(gpa, "{s}", "{s}", .{full});
+        for ([_][]const u8{ "init.lua:", "gewaehlt.lua:", "[string \"init.lua\"]:", "[string \"gewaehlt.lua\"]:" }) |prefix| {
+            if (std.mem.startsWith(u8, full, prefix)) {
+                return self.setErr(gpa, "Zeile {s}", "Line {s}", .{full[prefix.len..]});
+            }
         }
+        self.setErr(gpa, "{s}", "{s}", .{full});
     }
 
     /// Loads settings from Lua source. On errors it returns a safe config
@@ -1541,6 +1541,7 @@ const lua_Integer = c_longlong;
 const lua_KContext = isize;
 
 const LUA_OK: c_int = 0;
+const LUA_MULTRET: c_int = -1;
 const LUA_TNIL: c_int = 0;
 const LUA_TBOOLEAN: c_int = 1;
 const LUA_TNUMBER: c_int = 3;
@@ -1565,18 +1566,25 @@ extern "c" fn luaopen_math(L: *lua_State) c_int;
 extern "c" fn luaopen_utf8(L: *lua_State) c_int;
 extern "c" fn luaopen_os(L: *lua_State) c_int;
 extern "c" fn luaL_loadbufferx(L: *lua_State, buff: [*]const u8, sz: usize, name: [*:0]const u8, mode: ?[*:0]const u8) c_int;
+extern "c" fn lua_callk(L: *lua_State, nargs: c_int, nresults: c_int, ctx: lua_KContext, k: ?*const anyopaque) void;
 extern "c" fn lua_pcallk(L: *lua_State, nargs: c_int, nresults: c_int, errfunc: c_int, ctx: lua_KContext, k: ?*const anyopaque) c_int;
 extern "c" fn lua_sethook(L: *lua_State, func: ?lua_Hook, mask: c_int, count: c_int) void;
 extern "c" fn luaL_error(L: *lua_State, fmt: [*:0]const u8, ...) c_int;
 extern "c" fn lua_getglobal(L: *lua_State, name: [*:0]const u8) c_int;
 extern "c" fn lua_setglobal(L: *lua_State, name: [*:0]const u8) void;
+extern "c" fn lua_getfield(L: *lua_State, idx: c_int, k: [*:0]const u8) c_int;
 extern "c" fn lua_setfield(L: *lua_State, idx: c_int, k: [*:0]const u8) void;
 extern "c" fn lua_pushnil(L: *lua_State) void;
+extern "c" fn lua_pushinteger(L: *lua_State, n: lua_Integer) void;
 extern "c" fn lua_pushstring(L: *lua_State, s: [*:0]const u8) ?[*:0]const u8;
+extern "c" fn lua_pushvalue(L: *lua_State, idx: c_int) void;
+extern "c" fn lua_pushcclosure(L: *lua_State, f: lua_CFunction, n: c_int) void;
 extern "c" fn lua_rawget(L: *lua_State, idx: c_int) c_int;
 extern "c" fn lua_rawset(L: *lua_State, idx: c_int) void;
 extern "c" fn lua_gettop(L: *lua_State) c_int;
 extern "c" fn lua_rawgeti(L: *lua_State, idx: c_int, n: lua_Integer) c_int;
+extern "c" fn lua_type(L: *lua_State, idx: c_int) c_int;
+extern "c" fn lua_tocfunction(L: *lua_State, idx: c_int) ?lua_CFunction;
 extern "c" fn lua_toboolean(L: *lua_State, idx: c_int) c_int;
 extern "c" fn lua_isinteger(L: *lua_State, idx: c_int) c_int;
 extern "c" fn lua_tointegerx(L: *lua_State, idx: c_int, isnum: ?*c_int) lua_Integer;
@@ -1589,18 +1597,23 @@ fn luaPop(L: *lua_State, n: c_int) void {
     lua_settop(L, -n - 1);
 }
 
+fn luaUpvalueIndex(i: c_int) c_int {
+    return LUA_REGISTRYINDEX - i;
+}
+
 /// A config gets no more memory than this. A thousand times enough for any
 /// honest `init.lua`, and it stops one that has lost its way.
 const lua_mem_limit = 32 * 1024 * 1024;
-/// After this many steps it's over (endless loop). The hook fires every
-/// `lua_step_chunk` steps.
+/// After this many steps it's over (endless loop or runaway pattern). The VM
+/// hook fires every `lua_step_chunk` instructions; pattern matching in C
+/// charges its backtracking bound against the same budget.
 const lua_step_chunk = 100_000;
 const too_long_de = "die Config rechnet zu lange (Endlosschleife?)";
-const lua_step_limit = 200; // × lua_step_chunk = 20 million steps
+const lua_max_steps: u64 = 200 * lua_step_chunk; // 20 million steps
 
 const LuaMem = struct {
     used: usize = 0,
-    steps: u32 = 0,
+    steps: u64 = 0,
 };
 
 fn luaAlloc(ud: ?*anyopaque, ptr: ?*anyopaque, osize: usize, nsize: usize) callconv(.c) ?*anyopaque {
@@ -1618,18 +1631,140 @@ fn luaAlloc(ud: ?*anyopaque, ptr: ?*anyopaque, osize: usize, nsize: usize) callc
     return new;
 }
 
-fn luaBudgetHook(L: *lua_State, _: ?*anyopaque) callconv(.c) void {
+fn chargeLuaSteps(L: *lua_State, n: u64) void {
     // The counter lives in the same block as the memory accounting.
     var ud: ?*anyopaque = null;
     _ = lua_getallocf(L, &ud);
     const mem: *LuaMem = @ptrCast(@alignCast(ud.?));
-    mem.steps += 1;
-    if (mem.steps >= lua_step_limit) {
+    mem.steps +|= n;
+    if (mem.steps >= lua_max_steps) {
         _ = luaL_error(L, "abgebrochen: " ++ too_long_de);
     }
 }
 
+fn luaBudgetHook(L: *lua_State, _: ?*anyopaque) callconv(.c) void {
+    chargeLuaSteps(L, lua_step_chunk);
+}
+
 extern "c" fn lua_getallocf(L: *lua_State, ud: *?*anyopaque) lua_Alloc;
+
+/// Upper bound on the backtracking steps Lua's pattern matcher can take for a
+/// subject of `s_len` bytes. Lua patterns have neither group quantifiers nor
+/// alternation, so only `*`, `+`, `-` (up to `s_len + 1` branches each) and `?`
+/// (up to 2 branches each) can multiply the work.
+fn patternWork(s_len: usize, pat: []const u8, plain: bool) u64 {
+    const n: u64 = s_len +| 1;
+    const m: u64 = @max(pat.len, 1);
+    if (plain) return n *| m;
+
+    const anchored = pat.len > 0 and pat[0] == '^';
+    var i: usize = if (anchored) 1 else 0;
+    var work: u64 = if (anchored) m else n *| m;
+
+    while (i < pat.len) {
+        switch (pat[i]) {
+            '%' => {
+                if (i + 1 >= pat.len) break;
+                switch (pat[i + 1]) {
+                    'b' => {
+                        work *|= n;
+                        i = @min(i + 4, pat.len);
+                        continue;
+                    },
+                    'f' => {
+                        i += 2;
+                        if (i < pat.len and pat[i] == '[') i = skipCharSet(pat, i);
+                        continue;
+                    },
+                    else => i += 2,
+                }
+            },
+            '[' => i = skipCharSet(pat, i),
+            '(', ')' => {
+                i += 1;
+                continue;
+            },
+            else => i += 1,
+        }
+        if (i < pat.len) switch (pat[i]) {
+            '*', '+', '-' => {
+                work *|= n;
+                i += 1;
+            },
+            '?' => {
+                work *|= 2;
+                i += 1;
+            },
+            else => {},
+        };
+    }
+    return work;
+}
+
+fn skipCharSet(pat: []const u8, start: usize) usize {
+    var i = start + 1;
+    if (i < pat.len and pat[i] == '^') i += 1;
+    // A `]` right at the start of the set is part of the set, not the end.
+    if (i < pat.len and pat[i] == ']') i += 1;
+    while (i < pat.len and pat[i] != ']') {
+        if (pat[i] == '%' and i + 1 < pat.len) i += 2 else i += 1;
+    }
+    return if (i < pat.len) i + 1 else pat.len;
+}
+
+fn checkPatternArgs(L: *lua_State, is_find: bool) u64 {
+    const top = lua_gettop(L);
+    if (top < 2) return 1;
+    const t1 = lua_type(L, 1);
+    const t2 = lua_type(L, 2);
+    if ((t1 != LUA_TSTRING and t1 != LUA_TNUMBER) or
+        (t2 != LUA_TSTRING and t2 != LUA_TNUMBER)) return 1;
+    var s_len: usize = 0;
+    _ = lua_tolstring(L, 1, &s_len) orelse return 1;
+    var p_len: usize = 0;
+    const p_ptr = lua_tolstring(L, 2, &p_len) orelse return 1;
+    const plain = is_find and top >= 4 and lua_toboolean(L, 4) != 0;
+    const work = patternWork(s_len, p_ptr[0..p_len], plain);
+    chargeLuaSteps(L, work);
+    return work;
+}
+
+fn safeStrFind(L: *lua_State) callconv(.c) c_int {
+    _ = checkPatternArgs(L, true);
+    const orig = lua_tocfunction(L, luaUpvalueIndex(1)).?;
+    return orig(L);
+}
+
+fn safeStrPattern(L: *lua_State) callconv(.c) c_int {
+    _ = checkPatternArgs(L, false);
+    const orig = lua_tocfunction(L, luaUpvalueIndex(1)).?;
+    return orig(L);
+}
+
+fn safeGmatchIter(L: *lua_State) callconv(.c) c_int {
+    const work: u64 = @intCast(lua_tointegerx(L, luaUpvalueIndex(2), null));
+    chargeLuaSteps(L, work);
+    lua_settop(L, 0);
+    lua_pushvalue(L, luaUpvalueIndex(1));
+    lua_callk(L, 0, LUA_MULTRET, 0, null);
+    return lua_gettop(L);
+}
+
+fn safeStrGmatch(L: *lua_State) callconv(.c) c_int {
+    const work = checkPatternArgs(L, false);
+    const orig = lua_tocfunction(L, luaUpvalueIndex(1)).?;
+    const nret = orig(L);
+    if (nret != 1) return nret;
+    lua_pushinteger(L, @intCast(@min(work, std.math.maxInt(lua_Integer))));
+    lua_pushcclosure(L, safeGmatchIter, 2);
+    return 1;
+}
+
+fn wrapStringFn(L: *lua_State, name: [*:0]const u8, wrapper: lua_CFunction) void {
+    _ = lua_getfield(L, -1, name);
+    lua_pushcclosure(L, wrapper, 1);
+    lua_setfield(L, -2, name);
+}
 
 /// Opens only what a config needs: base functions, strings, tables, math and a
 /// few harmless queries (environment variables, time). Starting programs,
@@ -1654,9 +1789,15 @@ fn openSafeLibs(L: *lua_State) void {
         lua_setglobal(L, name);
     }
     // Turns functions into bytecode. Useless without `load`, so it goes as well.
+    // Pattern matching runs in C, where the VM instruction hook cannot see it,
+    // so it is wrapped to count toward the step budget.
     _ = lua_getglobal(L, "string");
     lua_pushnil(L);
     lua_setfield(L, -2, "dump");
+    wrapStringFn(L, "find", safeStrFind);
+    wrapStringFn(L, "match", safeStrPattern);
+    wrapStringFn(L, "gsub", safeStrPattern);
+    wrapStringFn(L, "gmatch", safeStrGmatch);
     luaPop(L, 1);
     _ = lua_getglobal(L, "os");
     for ([_][*:0]const u8{ "execute", "remove", "rename", "exit", "tmpname", "setlocale" }) |name| {
@@ -1814,6 +1955,8 @@ test "broken Lua does not crash and reports errors" {
 
     try std.testing.expect(cfg.fatal_lua);
     try std.testing.expect(cfg.err_msg != null);
+    try std.testing.expect(std.mem.startsWith(u8, cfg.err_msg.?, "Zeile 1:"));
+    try std.testing.expect(std.mem.startsWith(u8, cfg.err_msg_en.?, "Line 1:"));
     try std.testing.expectEqualStrings("Strg+S", cfg.keyLabel(.save));
 }
 
@@ -1940,20 +2083,48 @@ test "config on a leash: endless loop, metatables, blocked functions" {
         defer cfg.deinit(gpa);
         try std.testing.expect(cfg.fatal_lua);
     }
-    inline for (.{ "os.execute('true')", "io.open('/etc/passwd')", "require('os')", "dofile('/etc/passwd')", "load('return 1')", "print('\x1b[2J')", "string.dump(function() end)" }) |src| {
+    inline for (.{
+        "os.execute('true')",
+        "io.open('/etc/passwd')",
+        "require('os')",
+        "dofile('/etc/passwd')",
+        "load('return 1')",
+        "print('\x1b[2J')",
+        "string.dump(function() end)",
+    }) |src| {
         var cfg = try Config.loadFromSlice(gpa, src);
         defer cfg.deinit(gpa);
         try std.testing.expect(cfg.fatal_lua);
     }
+    // Pathological pattern matching in C counts toward the step budget too.
+    inline for (.{
+        "('a'):rep(100):find('a*a*a*a*a*a*a*a*b')",
+        "('a'):rep(100):match('a*a*a*a*a*a*a*a*b')",
+        "('a'):rep(100):gsub('a*a*a*a*a*a*a*a*b', '')",
+        "for _ in ('a'):rep(100):gmatch('a*a*a*a*a*a*a*a*b') do end",
+        "local f = ('a'):rep(1500):gmatch('a*b'); for _ = 1, 10 do f() end",
+    }) |src| {
+        var cfg = try Config.loadFromSlice(gpa, src);
+        defer cfg.deinit(gpa);
+        try std.testing.expect(cfg.fatal_lua);
+        try std.testing.expect(std.mem.indexOf(u8, cfg.err_msg.?, "zu lange") != null);
+    }
     {
-        // Harmless things stay allowed.
+        // Harmless things stay allowed, including normal pattern matching and plain search.
         var cfg = try Config.loadFromSlice(gpa,
             \\local heim = os.getenv("HOME") or ""
-            \\tab_breite = math.max(2, string.len("ab"))
+            \\local s = ("  mohawk  "):match("^%s*(.-)%s*$")
+            \\if s:find("a*a*a*a*a*a*a*a*b", 1, true) == nil and s:gsub("o", "o") == "mohawk" then
+            \\    theme = s
+            \\end
+            \\local n = 0
+            \\for w in ("eins zwei"):gmatch("%S+") do n = n + #w end
+            \\tab_breite = math.max(2, string.len("ab"), n - 6)
         );
         defer cfg.deinit(gpa);
         try std.testing.expect(cfg.err_msg == null);
         try std.testing.expectEqual(@as(usize, 2), cfg.tab_width);
+        try std.testing.expectEqualStrings("mohawk", cfg.theme_name);
     }
 }
 

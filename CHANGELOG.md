@@ -21,3 +21,5 @@ All notable changes to iro are documented here. The format follows
 
 ### Security
 - The config sandbox no longer offers `print` and `string.dump`.
+- Pattern matching in `init.lua` (`string.find`, `match`, `gmatch`, `gsub`) now
+  counts toward the step limit.
