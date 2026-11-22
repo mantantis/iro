@@ -79,8 +79,12 @@ const fixed = [_]Item{
     } },
     .{ .kind = .header, .label = .{ .de = "Bedienung", .en = "Behavior" } },
     .{ .kind = .gear, .lua = "gear", .label = .{ .de = "Gear beim Start", .en = "Gear at startup" }, .say = .{
-        .de = "Blade: nur der Text, für Configs. Forge: Baum, Minimap, Git. „automatisch“: Datei → Blade, Ordner → Forge. Alt+G wechselt jederzeit.",
-        .en = "Blade: just the text, for configs. Forge: tree, minimap, git. \"auto\": file → Blade, folder → Forge. Alt+G switches anytime.",
+        .de = "Blade: nur der Text, für Configs. Forge: Baum, Minimap, Git. „automatisch“: Einzeldatei → Blade, sonst → Forge. Alt+G wechselt jederzeit.",
+        .en = "Blade: just the text, for configs. Forge: tree, minimap, git. \"auto\": single file → Blade, otherwise → Forge. Alt+G switches anytime.",
+    } },
+    .{ .kind = .toggle, .lua = "auto_gear", .label = .{ .de = "Automatikgetriebe", .en = "Automatic gear shift" }, .say = .{
+        .de = "Schaltet in Blade automatisch zu Forge hoch, sobald du Dateibaum, zweiten Tab, geteilte Ansicht oder Dateisuche öffnest.",
+        .en = "In Blade, automatically shifts up to Forge when you open the file tree, a second tab, split view or file search.",
     } },
     .{ .kind = .language, .lua = "language", .label = .{ .de = "Sprache · Language", .en = "Language · Sprache" }, .say = .{
         .de = "„automatisch“ folgt der Sprache deines Systems (LANG). ←/→ schaltet um, sofort.",

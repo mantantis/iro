@@ -59,8 +59,10 @@ Die meiste Arbeit im Editor ist eine von zwei Sorten, deshalb hat iro zwei Gäng
 | ⚒️ | **Forge** | *Heat up. Hammer. Ship it.* | Dateibaum, Minimap, Git-Spalte, projektweite Dateisuche. Zum richtigen Programmieren. |
 
 iro **wählt den Gang selbst**: Öffnest du eine Datei, landest du in Blade;
-öffnest du einen Ordner (oder gar nichts), landest du in Forge. Alt+G wechselt
-jederzeit, und die Tasten bleiben in beiden Gängen gleich.
+öffnest du einen Ordner (oder gar nichts), landest du in Forge. Holst du in
+Blade den Dateibaum, einen zweiten Tab, die geteilte Ansicht oder die Dateisuche,
+schaltet iro von selbst zu Forge hoch. Alt+G wechselt jederzeit, und die Tasten
+bleiben in beiden Gängen gleich.
 
 ### 🎨 Von Haus aus gericed, ruhig, wenn es drauf ankommt
 

@@ -57,8 +57,9 @@ Most editing is one of two jobs, so iro has two gears:
 | ⚒️ | **Forge** | *Heat up. Hammer. Ship it.* | File tree, minimap, git gutter, project-wide file search. For actually writing code. |
 
 iro **picks the gear for you**: open a file and you land in Blade, open a folder
-(or nothing at all) and you land in Forge. Alt+G switches at any time, and the
-keys never change between gears.
+(or nothing at all) and you land in Forge. Ask for the file tree, a second tab,
+split view or file search while in Blade and iro shifts up to Forge on its own.
+Alt+G switches at any time, and the keys never change between gears.
 
 ### 🎨 Riced by default, quiet when it matters
 

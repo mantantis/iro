@@ -758,6 +758,7 @@ pub const setting_aliases = [_]Alias{
     .{ .en = "brackets", .de = "klammern" },
     .{ .en = "esc_menu", .de = "esc_menue" },
     .{ .en = "history", .de = "versionen" },
+    .{ .en = "auto_gear", .de = "automatik" },
     .{ .en = "theme", .de = "thema" },
     .{ .en = "colors", .de = "farben" },
     .{ .en = "keys", .de = "tasten" },
@@ -811,6 +812,7 @@ pub const bool_settings = [_]BoolSetting{
     .{ .lua = "brackets", .field = "brackets" },
     .{ .lua = "esc_menu", .field = "esc_menu" },
     .{ .lua = "history", .field = "history" },
+    .{ .lua = "auto_gear", .field = "auto_gear" },
 };
 
 /// Settings for which iro remembers whether init.lua sets them itself.
@@ -838,9 +840,12 @@ pub const Config = struct {
     /// The language everything currently appears in. Set by main.zig after
     /// every load (config or, for "auto", the system language).
     lang: Lang = .de,
-    /// Gear at start. `null` means "auto": a file starts in Blade, a folder or
-    /// nothing in Forge.
+    /// Gear at start. `null` means "auto": a single file starts in Blade,
+    /// several files, a folder or nothing in Forge.
     gear: ?Gear = null,
+    /// In Blade, automatically shift up to Forge when a project feature
+    /// (file tree, second tab, split view, file search) is used.
+    auto_gear: bool = true,
     /// `null`: the Lua config does not set `hints` (the state file applies then).
     hints_on: ?bool = null,
     tab_width: usize = 4,
@@ -1351,8 +1356,9 @@ pub const default_init_lua_de =
     \\
     \\-- Gear beim Start. "blade": nur der Text, schnell, für Configs.
     \\-- "forge": Baum, Minimap und Git-Spalte, zum Programmieren.
-    \\-- "auto": eine Datei startet in Blade, ein Ordner in Forge. Alt+G wechselt jederzeit.
+    \\-- "auto": eine Datei startet in Blade, mehrere oder ein Ordner in Forge. Alt+G wechselt jederzeit.
     \\-- gear = "auto"
+    \\-- auto_gear = true      -- in Blade bei Baum, 2. Tab, geteilter Ansicht oder Dateisuche zu Forge hochschalten
     \\
     \\-- Hinweisleiste über der Statuszeile (weglassen = Wahl von F1 merken)
     \\-- hints = true
@@ -1448,8 +1454,9 @@ pub const default_init_lua_en =
     \\
     \\-- Gear at startup. "blade": just the text, fast, for configs.
     \\-- "forge": tree, minimap and git gutter, for coding.
-    \\-- "auto": a file starts in Blade, a folder in Forge. Alt+G switches anytime.
+    \\-- "auto": a single file starts in Blade, several or a folder in Forge. Alt+G switches anytime.
     \\-- gear = "auto"
+    \\-- auto_gear = true      -- in Blade, shift up to Forge on tree, 2nd tab, split view or file search
     \\
     \\-- Hint bar above the status bar (leave out = remember the F1 choice)
     \\-- hints = true
@@ -2002,6 +2009,10 @@ test "gear: auto, blade, forge and nonsense" {
     try std.testing.expect(zahl.err_msg != null);
     // Alt+G is free and belongs to the gear switch.
     try std.testing.expectEqualStrings("Alt+G", leer.keyLabel(.gear));
+    try std.testing.expect(leer.auto_gear);
+    var no_auto = try Config.loadFromSlice(gpa, "automatik = false");
+    defer no_auto.deinit(gpa);
+    try std.testing.expect(!no_auto.auto_gear);
 }
 
 test "English names, German understood, init.lua wins even in German" {

@@ -40,8 +40,8 @@ pub fn generate(arena: Allocator, cfg: *const config.Config) Allocator.Error![]c
             .{ .cmd = .about, .say = .{ .de = "Über iro: Version, Autor und ein kleiner Effekt.", .en = "About iro: version, author and a little effect." } },
         } },
         .{ .head = .{ .de = "Zwei Gears: Blade und Forge", .en = "Two gears: Blade and Forge" }, .intro = .{
-            .de = "Die Tasten sind in beiden Gears gleich. Es ändert sich nur, was du siehst und was im Hintergrund läuft.\nEine Datei startet in Blade, ein Ordner oder gar nichts in Forge.",
-            .en = "The keys are the same in both gears. Only what you see and what runs in the background changes.\nA file starts in Blade, a folder or nothing at all starts in Forge.",
+            .de = "Die Tasten sind in beiden Gears gleich. Es ändert sich nur, was du siehst und was im Hintergrund läuft.\nEine Datei startet in Blade, mehrere oder ein Ordner in Forge. Öffnest du in Blade den Baum, einen zweiten Tab, die geteilte Ansicht oder die Dateisuche, schaltet iro von selbst zu Forge hoch.",
+            .en = "The keys are the same in both gears. Only what you see and what runs in the background changes.\nA single file starts in Blade, several or a folder start in Forge. Open the tree, a second tab, split view or file search in Blade and iro shifts up to Forge on its own.",
         }, .lines = &.{
             .{ .cmd = .gear, .say = .{ .de = "Gear wechseln. Unten links in der Statuszeile steht, in welchem du gerade bist.", .en = "Switch gear. The bottom left of the status bar shows which one you're in." } },
             .{ .key = .{ .de = "Blade", .en = "Blade" }, .say = .{ .de = "Get in. Cut. Get out. Nur der Text. Kein Baum, keine Minimap, kein Git im Hintergrund. Für Configs.", .en = "Get in. Cut. Get out. Just the text. No tree, no minimap, no git in the background. For configs." } },

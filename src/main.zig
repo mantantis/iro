@@ -1350,6 +1350,9 @@ pub const App = struct {
         self.loadGitBase(doc);
         self.msg_len = 0;
         self.activate();
+        if (self.docs.items.len > 1 and doc.title == null) {
+            _ = self.upshiftToForge();
+        }
     }
 
     /// Ctrl+N: new, empty tab.
@@ -1420,7 +1423,7 @@ pub const App = struct {
         };
         self.focus = .text;
         if (!is_new) self.rememberRecent(doc.path.?);
-        if (is_new and self.prompt == null) self.say(false, "Neue Datei", "New file", .{});
+        if (is_new and self.prompt == null and self.msg_len == 0) self.say(false, "Neue Datei", "New file", .{});
     }
 
     /// Ctrl+W: close the tab, asking first if there are unsaved changes.
@@ -1524,6 +1527,27 @@ pub const App = struct {
         }});
     }
 
+    /// Automatic transmission: when a project feature (file tree, second tab,
+    /// split view, file search) is used in Blade, iro shifts up to Forge on its
+    /// own. It never shifts down automatically.
+    fn upshiftToForge(self: *App) bool {
+        if (self.gear == .forge or !self.cfg.auto_gear) return false;
+        self.gear = .forge;
+        self.minimap_forced = false;
+        for (self.docs.items) |doc| {
+            if (self.gitWanted() != (doc.git_base != null)) self.loadGitBase(doc);
+        }
+        if (self.msg_len == 0) {
+            const k = self.cfg.keyLabel(.gear);
+            if (k.len > 0) {
+                self.say(false, "Forge — {s} zurück", "Forge — {s} back", .{k});
+            } else {
+                self.setMsg(false, "Forge · Heat up. Hammer. Ship it.", .{});
+            }
+        }
+        return true;
+    }
+
     /// Ctrl+B: show the tree and jump into it. Already inside: hide the tree.
     fn toggleTree(self: *App) void {
         self.msg_len = 0;
@@ -1535,6 +1559,7 @@ pub const App = struct {
         }
         const existed = self.tree != null;
         if (!self.ensureTree()) return;
+        _ = self.upshiftToForge();
         const t = &self.tree.?;
         const opening = !self.tree_visible;
         // Reread when showing it again; something may have changed outside.
@@ -1961,6 +1986,7 @@ pub const App = struct {
             .files => {
                 if (!self.ensureTree()) return pal.arena.deinit();
                 self.fileScopes(&pal, arena) catch return pal.arena.deinit();
+                _ = self.upshiftToForge();
                 self.palette = pal;
                 self.enterScope(0);
                 return;
@@ -2631,6 +2657,7 @@ pub const App = struct {
                 const path = self.d.path orelse return self.say(false, "Diese Datei hat noch keinen Ordner", "This file has no folder yet", .{});
                 const dir = std.fs.path.dirname(path) orelse "/";
                 if (!self.ensureTree()) return;
+                _ = self.upshiftToForge();
                 const t = &self.tree.?;
                 if (!std.mem.eql(u8, t.root, dir)) t.setRoot(self.io, dir) catch |err| return self.treeFailed(err);
                 _ = t.selectPath(path);
@@ -2653,6 +2680,7 @@ pub const App = struct {
                 // The tree must be visible, otherwise nobody knows what this is
                 // about.
                 if (!self.ensureTree()) return;
+                _ = self.upshiftToForge();
                 self.tree_visible = true;
                 self.focus = .tree;
                 self.treeAsk(switch (cmd) {
@@ -3387,6 +3415,15 @@ pub const App = struct {
         self.split_right_active = false;
         self.split_other_doc = if (self.docs.items.len > 1) (self.cur + 1) % self.docs.items.len else self.cur;
         self.split_other_top = self.docs.items[self.split_other_doc].top_line;
+        if (self.split_on and self.upshiftToForge()) {
+            const k = self.cfg.keyLabel(.gear);
+            if (k.len > 0) {
+                self.say(false, "Ansicht geteilt · Forge — {s} zurück", "View split · Forge — {s} back", .{k});
+            } else {
+                self.say(false, "Ansicht geteilt · Forge", "View split · Forge", .{});
+            }
+            return;
+        }
         self.setMsg(false, "{s}", .{if (self.split_on) self.pick("Ansicht geteilt (Alt+Links/Rechts wechselt die Seite)", "View split (Alt+Left/Right switches sides)") else self.pick("Geteilte Ansicht geschlossen", "Split view closed")});
     }
 
@@ -3931,16 +3968,17 @@ const usage_en =
 ;
 
 /// Which gear at start if neither the command line nor the config says: opening
-/// only files means a quick edit (Blade). A folder or nothing at all means a
-/// project (Forge).
-fn autoGear(has_args: bool, has_dir: bool) config.Gear {
-    return if (has_args and !has_dir) .blade else .forge;
+/// a single file means a quick edit (Blade). Several files, a folder or nothing
+/// at all mean a project (Forge).
+fn autoGear(file_count: usize, has_dir: bool) config.Gear {
+    return if (file_count == 1 and !has_dir) .blade else .forge;
 }
 
 test "gear at start" {
-    try std.testing.expectEqual(config.Gear.blade, autoGear(true, false));
-    try std.testing.expectEqual(config.Gear.forge, autoGear(true, true));
-    try std.testing.expectEqual(config.Gear.forge, autoGear(false, false));
+    try std.testing.expectEqual(config.Gear.blade, autoGear(1, false));
+    try std.testing.expectEqual(config.Gear.forge, autoGear(2, false));
+    try std.testing.expectEqual(config.Gear.forge, autoGear(1, true));
+    try std.testing.expectEqual(config.Gear.forge, autoGear(0, false));
 }
 
 /// `iro --search-probe FOLDER [WORD]`: indexes FOLDER like the file search and
@@ -4065,8 +4103,8 @@ pub fn main(init: std.process.Init) !void {
     app.sys_lang = sys_lang;
     app.applyConfig(); // in case there is no init.lua at all
     app.loadConfig(false);
-    // Command line beats config, config beats "auto". Auto: files only → Blade.
-    app.gear = cli_gear orelse app.cfg.gear orelse autoGear(file_args.items.len > 0, start_dir != null);
+    // Command line beats config, config beats "auto". Auto: single file → Blade.
+    app.gear = cli_gear orelse app.cfg.gear orelse autoGear(file_args.items.len, start_dir != null);
     for (app.docs.items) |doc| {
         app.d = doc;
         app.initSwapPath() catch {};

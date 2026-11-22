@@ -400,6 +400,19 @@ keys C-q; sleep 0.3
 start "$E"
 ok "A folder starts in Forge"     'screen | tail -1 | grep -q "FORGE"'
 keys C-q; sleep 0.3
+start "$E/minimap.txt"
+keys C-b; sleep 0.3
+ok "Ctrl+B in Blade shifts up to Forge" 'screen | tail -1 | grep -q "FORGE" && screen | tail -1 | grep -q "Forge — Alt+G zurück" && screen | grep -q "⣿⣿⣿"'
+keys M-g; sleep 0.3
+keys C-n; sleep 0.3
+ok "Second tab in Blade shifts up to Forge" 'screen | tail -1 | grep -q "FORGE" && screen | tail -1 | grep -q "Forge — Alt+G zurück"'
+keys C-q; sleep 0.3
+mkdir -p "$XDG_CONFIG_HOME/iro"; printf 'auto_gear = false\n' > "$XDG_CONFIG_HOME/iro/init.lua"
+start "$E/minimap.txt"
+keys C-b; sleep 0.3
+ok "auto_gear = false stays in Blade" 'screen | tail -1 | grep -q "BLADE" && ! screen | grep -q "⣿⣿⣿"'
+keys C-q; sleep 0.3
+rm -f "$XDG_CONFIG_HOME/iro/init.lua"
 
 echo "Language: English via LANG, German via config"
 EXTRA_ENV="LANG=en_US.UTF-8" start "$E/minimap.txt"
