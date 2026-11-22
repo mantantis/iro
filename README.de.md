@@ -80,6 +80,12 @@ bleiben in beiden Gängen gleich.
 
 ### 🛟 Paranoid, wenn es um deine Daten geht
 
+- **Config-Fallschirm:** Bevor iro bekannte System- und Dotfile-Configs speichert
+  (`fstab`, `sudoers`, `sshd_config`, `systemd`-Units, Shell-Skripte, JSON),
+  prüft es den Entwurf mit dem passenden Werkzeug (`findmnt --verify`,
+  `visudo -cf`, `sshd -t`, `systemd-analyze verify`, `bash -n`/`sh -n`,
+  eingebauter JSON-Prüfer) und warnt vor kaputter Syntax. Hyprland-Configs prüft
+  iro direkt nach dem Speichern über `hyprctl configerrors`.
 - **Atomares Speichern:** erst in eine Zwischendatei schreiben, synchronisieren,
   dann umbenennen. Ein Absturz mitten im Speichern lässt die alte Datei heil.
   Rechte, Besitzer und Gruppe, ACLs und Symlinks bleiben erhalten. Dateien mit
@@ -194,11 +200,9 @@ kommentierte an. Änderungen gelten beim Speichern.
 
 ## Roadmap
 
-- **Config-Fallschirm:** Bevor eine System-Config gespeichert wird, prüft iro sie
-  mit dem Werkzeug, das sich damit am besten auskennt (`visudo -c`, `sshd -t`,
-  `findmnt --verify`, `hyprctl configerrors` und Co.), und kann eine riskante
-  Änderung automatisch zurückrollen, wenn du sie nicht bestätigst. Denn niemand
-  sollte einen Live-USB-Stick brauchen, um einen Tippfehler zu reparieren.
+- **Config-Fallschirm v2:** automatischer Totmannschalter, der eine riskante
+  System-Config zurückrollt, wenn du sie nicht rechtzeitig bestätigst, plus
+  atomares Speichern mit sudo.
 - **Ein komfortableres Forge:** Suche in Dateiinhalten und mehr von dem, was man
   braucht, um den ganzen Tag im Terminal zu programmieren.
 

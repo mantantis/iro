@@ -78,6 +78,12 @@ Alt+G switches at any time, and the keys never change between gears.
 
 ### 🛟 Paranoid about your data
 
+- **Config parachute:** before saving known system and dotfile configs (`fstab`,
+  `sudoers`, `sshd_config`, `systemd` units, shell scripts, JSON), iro checks
+  the draft with the matching tool (`findmnt --verify`, `visudo -cf`, `sshd -t`,
+  `systemd-analyze verify`, `bash -n`/`sh -n`, built-in JSON) and warns before
+  writing broken syntax. Hyprland configs are checked with `hyprctl configerrors`
+  right after saving.
 - **Atomic saves:** write to a temporary file, sync, then rename. A crash mid-save
   leaves the old file intact. Permissions, owner and group, ACLs and symlinks
   survive. Hard-linked files are written in place, so their links hold.
@@ -183,10 +189,8 @@ Changes apply on save.
 
 ## Roadmap
 
-- **Config parachute:** before saving a system config, iro checks it with the tool
-  that knows best (`visudo -c`, `sshd -t`, `findmnt --verify`, `hyprctl configerrors`
-  and friends), and can roll a risky change back automatically if you don't confirm
-  it. Because nobody should need a live USB stick to fix a typo.
+- **Config parachute v2:** automatic dead-man's switch that rolls a risky system
+  config back if you don't confirm it in time, plus atomic sudo saving.
 - **A more comfortable Forge:** search across file contents and more of what you
   need to code all day without leaving the terminal.
 

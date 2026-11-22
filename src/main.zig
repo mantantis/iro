@@ -53,7 +53,7 @@ const Event = union(enum) {
 
 const Loop = vaxis.Loop(Event);
 
-pub const PromptKind = enum { search, save_as, open, goto_line, tree_new_file, tree_new_dir, tree_rename, confirm_quit, confirm_close, confirm_overwrite, confirm_trash, recover, confirm_replace_file, replace_find, replace_with, confirm_each };
+pub const PromptKind = enum { search, save_as, open, goto_line, tree_new_file, tree_new_dir, tree_rename, confirm_quit, confirm_close, confirm_overwrite, confirm_parachute, confirm_trash, recover, confirm_replace_file, replace_find, replace_with, confirm_each };
 
 pub const Prompt = struct {
     kind: PromptKind,
@@ -288,6 +288,9 @@ pub const App = struct {
     /// "Save as" onto an existing file: the path, while the confirmation is
     /// pending.
     pending_save_as: ?[]u8 = null,
+    /// Config parachute warning while waiting for confirmation to save anyway.
+    parachute_tool: []const u8 = "",
+    parachute_err: ?[]u8 = null,
     /// Find and replace: what is searched for, what it is replaced with and how
     /// many replacements so far.
     replace_needle: std.ArrayList(u8) = .empty,
@@ -404,6 +407,7 @@ pub const App = struct {
         self.replace_needle.deinit(gpa);
         self.replace_with.deinit(gpa);
         if (self.pending_save_as) |p| gpa.free(p);
+        if (self.parachute_err) |e| gpa.free(e);
         self.clipboard.deinit(gpa);
         self.paste_buf.deinit(gpa);
         if (self.tree) |*t| t.deinit();
@@ -1206,6 +1210,18 @@ pub const App = struct {
         if (!force and fileio.changedOnDisk(self.io, cwd, path, self.d.meta)) {
             return self.openPrompt(.confirm_overwrite, "");
         }
+        if (!force and self.cfg.parachute) {
+            const draft = fileio.encode(self.gpa, &self.d.ed.buf, self.d.meta) catch null;
+            defer if (draft) |b| self.gpa.free(b);
+            if (draft) |bytes| {
+                if (iro.parachute.checkPreSave(self.gpa, self.io, path, bytes, self.lang) catch null) |prob| {
+                    self.openPrompt(.confirm_parachute, "");
+                    self.parachute_tool = prob.tool;
+                    self.parachute_err = prob.detail;
+                    return;
+                }
+            }
+        }
         // The state on disk goes into the history before it is overwritten.
         // Saving an untouched tab changes nothing on disk, unless it overwrites
         // someone else's edit (`force`), which is worth keeping too.
@@ -1230,6 +1246,15 @@ pub const App = struct {
         if (self.isConfigFile(path)) {
             self.loadConfig(true);
             if (!self.msg_bad) self.say(false, "Gespeichert und sofort übernommen: {s}", "Saved and applied right away: {s}", .{self.fileName()});
+        }
+        if (self.cfg.parachute and iro.parachute.isHyprConfig(path) and self.env.get("HYPRLAND_INSTANCE_SIGNATURE") != null) {
+            // Give Hyprland a moment to reload the saved config, then check for errors.
+            self.io.sleep(.fromMilliseconds(80), .awake) catch {};
+            if (iro.parachute.checkHyprland(self.gpa, self.io) catch null) |err_line| {
+                defer self.gpa.free(err_line);
+                self.after_save = .stay;
+                self.say(true, "Hyprland: {s} ({s} holt alte Version)", "Hyprland: {s} ({s} restores previous)", .{ err_line, self.cfg.keyLabel(.history) });
+            }
         }
         const after = self.after_save;
         self.after_save = .stay;
@@ -3012,6 +3037,9 @@ pub const App = struct {
         self.prompt = null;
         if (self.pending_save_as) |p| self.gpa.free(p);
         self.pending_save_as = null;
+        if (self.parachute_err) |e| self.gpa.free(e);
+        self.parachute_err = null;
+        self.parachute_tool = "";
     }
 
     // ───────────── Find and replace ─────────────
@@ -3185,6 +3213,16 @@ pub const App = struct {
                     self.after_save = .stay;
                     self.loadOverMine();
                 } else if (cp == Key.escape or key.matches('n', .{})) {
+                    self.closePrompt();
+                    self.after_save = .stay;
+                }
+                return;
+            },
+            .confirm_parachute => {
+                if (self.yes(key)) {
+                    self.closePrompt();
+                    self.save(true);
+                } else if (cp == Key.escape or key.matches('n', .{}) or key.matches('a', .{})) {
                     self.closePrompt();
                     self.after_save = .stay;
                 }

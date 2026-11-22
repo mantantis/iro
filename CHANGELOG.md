@@ -7,6 +7,10 @@ All notable changes to iro are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Config parachute: validates known configs (`fstab`, `sudoers`, `sshd_config`,
+  `systemd` units, shell scripts, JSON) before saving and checks Hyprland
+  configs via `hyprctl configerrors` right after saving (`parachute = false`
+  disables it).
 - Automatic gear shifting: opening the file tree, a second tab, split view or
   file search in Blade shifts up to Forge (`auto_gear = false` disables it).
 - Local history of earlier file versions: the last 20 per file, Alt+R brings one back.
