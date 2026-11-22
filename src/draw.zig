@@ -731,6 +731,7 @@ fn drawPalette(self: *App, win: vaxis.Window, arena: Allocator) void {
             .commands => ui(self, "Befehl suchen …", "Search commands …"),
             .files => fileAsk(self, p, arena),
             .dirs => ui(self, "Ordner suchen (zoxide) …", "Search folders (zoxide) …"),
+            .versions => fmtL(self, arena, "Frühere Versionen von {s} …", "Earlier versions of {s} …", .{self.d.name()}),
         };
         _ = box.printSegment(.{ .text = ask, .style = .{ .dim = true } }, .{ .col_offset = lead.col, .wrap = .none });
         box.showCursor(lead.col, 0);
@@ -1343,6 +1344,11 @@ fn currentHints(self: *App, arena: Allocator) []const Hint {
             .dirs => &.{
                 .{ .key = "↑↓", .label = .{ .de = "Wählen", .en = "Select" } },
                 .{ .key = "Enter", .label = .{ .de = "Dorthin, dann Datei suchen", .en = "Go there, then find file" } },
+                .{ .key = "Esc", .label = .{ .de = "Schließen", .en = "Close" } },
+            },
+            .versions => &.{
+                .{ .key = "↑↓", .label = .{ .de = "Wählen", .en = "Select" } },
+                .{ .key = "Enter", .label = .{ .de = "Zurückholen (nur in den Text)", .en = "Bring back (into the text only)" } },
                 .{ .key = "Esc", .label = .{ .de = "Schließen", .en = "Close" } },
             },
         };

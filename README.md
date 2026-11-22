@@ -78,6 +78,8 @@ keys never change between gears.
   symlinks survive.
 - **Crash recovery:** unsaved work, even in tabs without a file name, is backed
   up every two seconds and offered back after a crash or a closed terminal.
+- **Earlier versions:** before every save, the old state goes into a local history,
+  the last 20 per file. Alt+R brings one back. Secrets get no copies.
 - **Changed on disk?** iro tells you before it overwrites someone else's edit.
 - **Open twice?** The second iro only reads along, so neither overwrites the other.
   No stale-lock nagging after a crash.
@@ -142,6 +144,7 @@ plainer look with full functionality.
 | Key | Action |
 |---|---|
 | Ctrl+S / F12 | save / save as |
+| Alt+R | earlier versions of this file |
 | Ctrl+O / Ctrl+P / Alt+Z | find file / command palette / folder from zoxide |
 | Ctrl+B | file tree (inside: N new file, O new folder, F2 rename, Del trash) |
 | Ctrl+F / F3 / Ctrl+R | find / find next / find and replace |

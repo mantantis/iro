@@ -51,6 +51,7 @@ pub fn generate(arena: Allocator, cfg: *const config.Config) Allocator.Error![]c
         .{ .head = .{ .de = "Dateien", .en = "Files" }, .lines = &.{
             .{ .cmd = .open, .say = .{ .de = "Datei suchen und öffnen. Ein paar Buchstaben des Namens reichen.", .en = "Find and open a file. A few letters of its name are enough." } },
             .{ .cmd = .save_as, .say = .{ .de = "Unter neuem Namen speichern. Gibt es die Datei schon, fragt iro nach.", .en = "Save under a new name. If the file already exists, iro asks." } },
+            .{ .cmd = .history, .say = .{ .de = "Frühere Versionen dieser Datei, die letzten 20. Enter holt eine zurück in den Text, Strg+Z macht das rückgängig.", .en = "Earlier versions of this file, the last 20. Enter brings one back into the text, Ctrl+Z undoes that." } },
             .{ .cmd = .jump_dir, .say = .{ .de = "In einen Ordner springen, den du oft benutzt (zoxide).", .en = "Jump to a folder you use often (zoxide)." } },
             .{ .cmd = .tree, .say = .{ .de = "Dateibaum links zeigen. Nochmal drücken blendet ihn aus, Esc führt zurück in den Text.", .en = "Show the file tree on the left. Press again to hide it, Esc takes you back to the text." } },
             .{ .key = .{ .de = "im Baum", .en = "in the tree" }, .say = .{ .de = "N neue Datei, O neuer Ordner, F2 umbenennen, Entf in den Papierkorb (nichts wird endgültig gelöscht).", .en = "N new file, O new folder, F2 rename, Del moves to the trash (nothing is deleted for good)." } },

@@ -357,6 +357,7 @@ pub const Cmd = enum {
     palette,
     save,
     save_as,
+    history,
     open,
     open_path,
     jump_dir,
@@ -421,6 +422,7 @@ pub const cmd_specs = [_]CmdMeta{
     .{ .cmd = .palette, .lua_key = "palette", .lua_de = "befehle", .name = .{ .de = "Befehlspalette öffnen", .en = "Open command palette" }, .default_key = "Strg+P", .scope = .global, .in_palette = false },
     .{ .cmd = .save, .lua_key = "save", .lua_de = "speichern", .name = .{ .de = "Datei speichern", .en = "Save file" }, .default_key = "Strg+S", .scope = .global },
     .{ .cmd = .save_as, .lua_key = "save_as", .lua_de = "speichern_unter", .name = .{ .de = "Datei speichern unter …", .en = "Save file as …" }, .default_key = "F12", .fallback_key = "Strg+Umschalt+S", .scope = .global },
+    .{ .cmd = .history, .lua_key = "history", .lua_de = "versionen", .name = .{ .de = "Frühere Versionen dieser Datei …", .en = "Earlier versions of this file …" }, .default_key = "Alt+R", .scope = .global },
     .{ .cmd = .open, .lua_key = "open", .lua_de = "oeffnen", .name = .{ .de = "Datei öffnen: suchen …", .en = "Open file: search …" }, .default_key = "Strg+O", .scope = .global },
     .{ .cmd = .open_path, .lua_key = "open_path", .lua_de = "oeffnen_pfad", .name = .{ .de = "Datei öffnen: Pfad eintippen …", .en = "Open file: type a path …" }, .default_key = "", .palette_hint = .{ .de = "Strg+O, Tab", .en = "Ctrl+O, Tab" }, .scope = .global },
     .{ .cmd = .jump_dir, .lua_key = "jump_dir", .lua_de = "ordner_sprung", .name = .{ .de = "Ordner wechseln (zoxide) …", .en = "Switch folder (zoxide) …" }, .default_key = "Alt+Z", .scope = .global },
@@ -755,6 +757,7 @@ pub const setting_aliases = [_]Alias{
     .{ .en = "trailing_spaces", .de = "leerzeichen_am_ende" },
     .{ .en = "brackets", .de = "klammern" },
     .{ .en = "esc_menu", .de = "esc_menue" },
+    .{ .en = "history", .de = "versionen" },
     .{ .en = "theme", .de = "thema" },
     .{ .en = "colors", .de = "farben" },
     .{ .en = "keys", .de = "tasten" },
@@ -807,6 +810,7 @@ pub const bool_settings = [_]BoolSetting{
     .{ .lua = "trailing_spaces", .field = "show_trailing" },
     .{ .lua = "brackets", .field = "brackets" },
     .{ .lua = "esc_menu", .field = "esc_menu" },
+    .{ .lua = "history", .field = "history" },
 };
 
 /// Settings for which iro remembers whether init.lua sets them itself.
@@ -867,6 +871,8 @@ pub const Config = struct {
     /// Esc in the text opens the main menu when there is nothing else to
     /// cancel.
     esc_menu: bool = true,
+    /// Keep earlier versions of saved files (Alt+R brings them back).
+    history: bool = true,
     theme: Theme = .{},
     /// Name of the selected theme (`theme`).
     theme_name: []const u8 = "terminal",
@@ -1362,6 +1368,10 @@ pub const default_init_lua_de =
     \\-- Startseite mit Logo, wenn iro ohne Datei startet
     \\start_screen = true
     \\
+    \\-- Frühere Versionen jeder gespeicherten Datei aufheben (Alt+R holt sie zurück).
+    \\-- Dateien, die nur du lesen darfst, und Schlüssel bekommen nie Kopien.
+    \\history = true
+    \\
     \\-- Optik. Alles einzeln abschaltbar (false).
     \\icons = true             -- Nerd-Font-Symbole in Baum, Tabs und Statuszeile
     \\indent_guides = true     -- feine Linien in der Einrückung
@@ -1454,6 +1464,10 @@ pub const default_init_lua_en =
     \\
     \\-- Start screen with the logo when iro starts without a file
     \\start_screen = true
+    \\
+    \\-- Keep earlier versions of every file you save (Alt+R brings them back).
+    \\-- Files only you may read, and keys, never get copies.
+    \\history = true
     \\
     \\-- Looks. Each one can be switched off (false).
     \\icons = true             -- Nerd Font icons in the tree, tabs and status bar

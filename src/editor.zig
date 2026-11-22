@@ -212,6 +212,19 @@ pub const Editor = struct {
         return true;
     }
 
+    /// Replaces the whole text in one undo step (an earlier version of the
+    /// file, for instance). Undo brings the old text back with the cursor where
+    /// it was and nothing selected, so the next key can't wipe it all.
+    pub fn replaceText(self: *Editor, txt: []const u8) Error!void {
+        if (!std.unicode.utf8ValidateSlice(txt)) return error.InvalidUtf8;
+        const group = self.newGroup(.none);
+        self.goal = null;
+        self.anchor = null;
+        try self.applyDelete(group, .{}, self.buf.endPos());
+        self.cursor = .{};
+        self.cursor = try self.applyInsert(group, .{}, txt);
+    }
+
     // ───────────── Entering text ─────────────
 
     /// Inserts arbitrary text (e.g. from the clipboard), replacing the
@@ -1419,4 +1432,17 @@ test "bracket pairs" {
     const pair = ed.bracketPair(100).?;
     try testing.expectEqual(Pos{ .line = 2, .col = 1 }, pair[0]);
     try testing.expectEqual(Pos{ .line = 0, .col = 1 }, pair[1]);
+}
+
+test "replacing the whole text is one step, and undo selects nothing" {
+    var ed = try Editor.init(testing.allocator);
+    defer ed.deinit();
+    try ed.typeText("eins\nzwei\ndrei");
+    ed.setCursor(.{ .line = 1, .col = 2 }, false);
+    try ed.replaceText("alt\n");
+    try expectContent(&ed, "alt\n");
+    _ = try ed.undo();
+    try expectContent(&ed, "eins\nzwei\ndrei");
+    try testing.expect(ed.selection() == null);
+    try testing.expectEqual(Pos{ .line = 1, .col = 2 }, ed.cursor);
 }

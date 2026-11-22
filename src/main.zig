@@ -79,12 +79,15 @@ pub const PaletteItem = struct {
         file: []const u8,
         /// Full path of a folder.
         dir: []const u8,
+        /// An earlier version of the current file.
+        version: iro.history.Version,
     },
 };
 
-/// The search box can show three things: commands (Ctrl+P), files below the
-/// tree's folder (Ctrl+O) or folders from zoxide (Alt+Z).
-pub const PaletteMode = enum { commands, files, dirs };
+/// The search box can show four things: commands (Ctrl+P), files below the
+/// tree's folder (Ctrl+O), folders from zoxide (Alt+Z) or earlier versions of
+/// the current file (Alt+R).
+pub const PaletteMode = enum { commands, files, dirs, versions };
 
 pub const Palette = struct {
     mode: PaletteMode,
@@ -431,6 +434,24 @@ pub const App = struct {
 
     pub fn badColor(self: *const App) vaxis.Color {
         return toVaxisColor(self.cfg.theme.fehler);
+    }
+
+    /// Formatted text in the UI language, in `arena`.
+    fn pickFmt(self: *const App, arena: Allocator, comptime de: []const u8, comptime en: []const u8, args: anytype) []const u8 {
+        return (if (self.lang == .en) std.fmt.allocPrint(arena, en, args) else std.fmt.allocPrint(arena, de, args)) catch "";
+    }
+
+    /// How long ago, for a span in nanoseconds: "vor 12 Min." / "12 min ago".
+    fn agoText(self: *const App, arena: Allocator, ns: i96) []const u8 {
+        const s: u64 = @intCast(@max(@divTrunc(ns, std.time.ns_per_s), 0));
+        if (s < 60) return self.pick("gerade eben", "just now");
+        const m = s / 60;
+        if (m < 60) return self.pickFmt(arena, "vor {d} Min.", "{d} min ago", .{m});
+        const h = m / 60;
+        if (h < 24) return self.pickFmt(arena, "vor {d} Std.", "{d} h ago", .{h});
+        const days = h / 24;
+        if (days == 1) return self.pick("vor 1 Tag", "1 day ago");
+        return self.pickFmt(arena, "vor {d} Tagen", "{d} days ago", .{days});
     }
 
     /// Short text in the UI language.
@@ -1174,6 +1195,13 @@ pub const App = struct {
         const cwd = Io.Dir.cwd();
         if (!force and fileio.changedOnDisk(self.io, cwd, path, self.d.meta)) {
             return self.openPrompt(.confirm_overwrite, "");
+        }
+        // The state on disk goes into the history before it is overwritten.
+        // Saving an untouched tab changes nothing on disk, unless it overwrites
+        // someone else's edit (`force`), which is worth keeping too.
+        if (self.cfg.history and (self.d.ed.isModified() or force)) {
+            var root_buf: [Io.Dir.max_path_bytes]u8 = undefined;
+            if (self.statePath(&root_buf, "history")) |root| iro.history.keep(self.gpa, self.io, root, path) catch {};
         }
         fileio.save(self.gpa, self.io, cwd, path, &self.d.ed.buf, &self.d.meta) catch |err| {
             self.after_save = .stay;
@@ -1944,10 +1972,83 @@ pub const App = struct {
                     return self.say(false, "zoxide kennt noch keine Ordner", "zoxide does not know any folders yet", .{});
                 }
             },
+            .versions => if (!self.fillVersions(&list, arena)) return pal.arena.deinit(),
         }
         for (list.items, 0..) |*item, i| item.order = @intCast(i);
         pal.all = list.items;
         self.palette = pal;
+    }
+
+    /// Alt+R: earlier versions of the current file, newest first, each with
+    /// how long ago it was written and how much differs from the text now.
+    fn fillVersions(self: *App, list: *std.ArrayList(PaletteItem), arena: Allocator) bool {
+        const path = self.d.path orelse {
+            self.say(false, "Erst speichern: ohne Dateinamen gibt es keine Versionen", "Save first: without a file name there are no versions", .{});
+            return false;
+        };
+        var root_buf: [Io.Dir.max_path_bytes]u8 = undefined;
+        const root = self.statePath(&root_buf, "history") orelse return false;
+        const versions = iro.history.list(arena, self.io, root, path) catch return false;
+        if (versions.len == 0) {
+            if (self.cfg.history) {
+                self.say(false, "Von {s} gibt es noch keine früheren Versionen", "There are no earlier versions of {s} yet", .{self.d.name()});
+            } else {
+                self.say(false, "Frühere Versionen sind ausgeschaltet (history = false)", "Earlier versions are switched off (history = false)", .{});
+            }
+            return false;
+        }
+        const now_text = self.d.ed.buf.toBytes(arena, "\n") catch return false;
+        const now_lines = iro.gitdiff.splitLines(arena, now_text) catch return false;
+        const now_ns = Io.Timestamp.now(self.io, .real).nanoseconds;
+        for (versions) |v| {
+            const raw = iro.history.read(arena, self.io, root, path, v) catch continue;
+            const old_lines = iro.gitdiff.splitLines(arena, raw) catch continue;
+            const marks = arena.alloc(iro.gitdiff.Mark, now_lines.len) catch continue;
+            iro.gitdiff.marks(arena, old_lines, now_lines, marks) catch continue;
+            var differ: usize = 0;
+            for (marks) |m| {
+                if (m != .none) differ += 1;
+            }
+            const ago = self.agoText(arena, now_ns - v.written_ns);
+            const name = if (differ == 0)
+                self.pickFmt(arena, "{s} · wie jetzt", "{s} · same as now", .{ago})
+            else if (differ == 1)
+                self.pickFmt(arena, "{s} · 1 Zeile anders", "{s} · 1 line differs", .{ago})
+            else
+                self.pickFmt(arena, "{s} · {d} Zeilen anders", "{s} · {d} lines differ", .{ ago, differ });
+            list.append(arena, .{ .name = name, .action = .{ .version = v } }) catch break;
+        }
+        return list.items.len > 0;
+    }
+
+    /// Replaces the text with an earlier version, as one step that Ctrl+Z
+    /// takes back. Nothing reaches the disk until the next save.
+    fn restoreVersion(self: *App, v: iro.history.Version) void {
+        if (self.locked()) return;
+        const gpa = self.gpa;
+        const path = self.d.path orelse return;
+        var root_buf: [Io.Dir.max_path_bytes]u8 = undefined;
+        const root = self.statePath(&root_buf, "history") orelse return;
+        const raw = iro.history.read(gpa, self.io, root, path, v) catch |err| {
+            return self.say(true, "Version lässt sich nicht lesen ({s})", "Cannot read that version ({s})", .{@errorName(err)});
+        };
+        defer gpa.free(raw);
+        var loaded = fileio.decode(gpa, raw) catch {
+            return self.say(true, "Diese Version ist kein Text in UTF-8", "That version is not UTF-8 text", .{});
+        };
+        defer loaded.buf.deinit();
+        const txt = loaded.buf.toBytes(gpa, "\n") catch return self.sayOom();
+        defer gpa.free(txt);
+
+        const line = self.d.ed.cursor.line;
+        self.d.ed.replaceText(txt) catch |err| switch (err) {
+            error.InvalidUtf8 => return self.say(true, "Diese Version ist kein Text in UTF-8", "That version is not UTF-8 text", .{}),
+            error.OutOfMemory => return self.sayOom(),
+        };
+        self.d.ed.setCursor(.{ .line = @min(line, self.d.ed.buf.lineCount() - 1) }, false);
+        self.d.follow = true;
+        const ago = self.agoText(self.frame.allocator(), Io.Timestamp.now(self.io, .real).nanoseconds - v.written_ns);
+        self.say(false, "Stand von {s} zurückgeholt. {s} behält ihn, {s} nimmt ihn zurück.", "Brought back the state from {s}. {s} keeps it, {s} takes it back.", .{ ago, self.cfg.keyLabel(.save), self.cfg.keyLabel(.undo) });
     }
 
     // ───────────── File search: index, scopes, recent list ─────────────
@@ -2239,6 +2340,12 @@ pub const App = struct {
                 // Jumping into a folder usually means wanting a file there.
                 self.openPalette(.files);
             },
+            .version => |v| {
+                const name = gpa.dupe(u8, v.name) catch return self.sayOom();
+                defer gpa.free(name);
+                self.closePalette();
+                self.restoreVersion(.{ .name = name, .written_ns = v.written_ns });
+            },
         }
     }
 
@@ -2318,6 +2425,7 @@ pub const App = struct {
             .palette => self.openPalette(.commands),
             .save => self.save(false),
             .save_as => self.openPrompt(.save_as, self.d.path orelse ""),
+            .history => self.openPalette(.versions),
             .open => self.openPalette(.files),
             .open_path => self.openOpenPrompt(),
             .jump_dir => self.openPalette(.dirs),

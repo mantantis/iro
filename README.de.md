@@ -80,6 +80,9 @@ jederzeit, und die Tasten bleiben in beiden Gängen gleich.
 - **Wiederherstellung nach Absturz:** Ungespeichertes, auch in Tabs ohne
   Dateinamen, wird alle zwei Sekunden gesichert und nach einem Absturz oder einem
   geschlossenen Terminal wieder angeboten.
+- **Frühere Versionen:** Vor jedem Speichern wandert der alte Stand in einen lokalen
+  Verlauf, die letzten 20 pro Datei. Alt+R holt einen zurück. Geheimnisse bekommen
+  keine Kopien.
 - **Auf der Platte geändert?** iro sagt Bescheid, bevor es fremde Änderungen
   überschreibt.
 - **Doppelt offen?** Das zweite iro liest nur mit, keins überschreibt das andere.
@@ -151,6 +154,7 @@ Terminals bekommen eine schlichtere Optik bei vollem Funktionsumfang.
 | Taste | Wirkung |
 |---|---|
 | Strg+S / F12 | speichern / speichern unter |
+| Alt+R | frühere Versionen dieser Datei |
 | Strg+O / Strg+P / Alt+Z | Datei suchen / Befehlspalette / Ordner aus zoxide |
 | Strg+B | Dateibaum (darin: N neue Datei, O neuer Ordner, F2 umbenennen, Entf Papierkorb) |
 | Strg+F / F3 / Strg+R | suchen / weitersuchen / suchen und ersetzen |

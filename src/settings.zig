@@ -98,6 +98,10 @@ const fixed = [_]Item{
         .de = "Versteckte Dateien wie .gitignore im Baum zeigen.",
         .en = "Show hidden files like .gitignore in the tree.",
     } },
+    .{ .kind = .toggle, .lua = "history", .label = .{ .de = "Frühere Versionen aufheben", .en = "Keep earlier versions" }, .say = .{
+        .de = "Vor jedem Speichern kommt der alte Stand in den Verlauf, die letzten 20 pro Datei. Alt+R holt ihn zurück. Geheimnisse bekommen keine Kopien.",
+        .en = "Before every save the old state goes into the history, the last 20 per file. Alt+R brings it back. Secrets get no copies.",
+    } },
     .{ .kind = .tab_width, .lua = "tab_width", .label = .{ .de = "Tab-Breite", .en = "Tab width" }, .say = .{
         .de = "Wie breit ein Tab aussieht und wie weit Tab einrückt. ←/→ ändert.",
         .en = "How wide a tab looks and how far Tab indents. ←/→ changes it.",

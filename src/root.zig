@@ -24,6 +24,7 @@ pub const menu = @import("menu.zig");
 pub const settings = @import("settings.zig");
 pub const index = @import("index.zig");
 pub const search = @import("search.zig");
+pub const history = @import("history.zig");
 
 pub const Buffer = buffer.Buffer;
 pub const Pos = buffer.Pos;
@@ -51,4 +52,5 @@ test {
     _ = settings;
     _ = index;
     _ = search;
+    _ = history;
 }
