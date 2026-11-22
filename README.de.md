@@ -199,6 +199,8 @@ kommentierte an. Änderungen gelten beim Speichern.
 - **Ein komfortableres Forge:** Suche in Dateiinhalten und mehr von dem, was man
   braucht, um den ganzen Tag im Terminal zu programmieren.
 
+**Was neu ist:** steht in der [CHANGELOG.md](CHANGELOG.md) (auf Englisch).
+
 ## Bauen und testen
 
 ```sh

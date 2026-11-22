@@ -187,6 +187,8 @@ Changes apply on save.
 - **A more comfortable Forge:** search across file contents and more of what you
   need to code all day without leaving the terminal.
 
+**What's new:** see [CHANGELOG.md](CHANGELOG.md).
+
 ## Building and testing
 
 ```sh
