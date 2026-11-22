@@ -66,7 +66,8 @@ keys never change between gears.
   (green phosphor and amber CRT).
 - Cursor line, git gutter, indent guides, bracket pairs, a **Braille minimap**,
   smooth little animations and Nerd Font icons.
-- **0 W when idle.** When nothing moves, iro sleeps.
+- **Idle means idle.** No redraws, no busy loops, just a wallpaper sync every
+  ten seconds.
 - Everything can be switched off individually. Tasteful is the point, not a
   fairground.
 

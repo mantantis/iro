@@ -68,7 +68,8 @@ jederzeit, und die Tasten bleiben in beiden Gängen gleich.
   (grüner Phosphor- und Bernstein-Röhrenmonitor).
 - Cursorzeile, Git-Spalte, Einrückhilfen, Klammer-Paare, eine **Braille-Minimap**,
   kleine weiche Animationen und Nerd-Font-Symbole.
-- **0 W im Leerlauf.** Bewegt sich nichts, schläft iro.
+- **Leerlauf heißt Leerlauf.** Kein Neuzeichnen, keine Dauerschleife, nur alle zehn
+  Sekunden ein Wallpaper-Sync.
 - Alles einzeln abschaltbar. Geschmackvoll ist das Ziel, nicht Kirmes.
 
 ### 🛟 Paranoid, wenn es um deine Daten geht

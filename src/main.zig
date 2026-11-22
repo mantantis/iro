@@ -39,8 +39,11 @@ const Event = union(enum) {
     color_report: vaxis.Color.Report,
     paste_start,
     paste_end,
-    /// Fires every two seconds and triggers the recovery file.
+    /// Fires two seconds after a change the recovery file doesn't know yet.
     tick,
+    /// Fires every ten seconds: has the wallpaper (and with it the terminal
+    /// palette) changed?
+    color_tick,
     /// The file index has found something new (comes from a worker thread).
     index_progress,
 };
@@ -349,7 +352,8 @@ pub const App = struct {
     term_bg: ?[3]u8 = null,
     term_fg: ?[3]u8 = null,
     accent_rgb: ?[3]u8 = null,
-    color_tick: u8 = 0,
+    /// Is the recovery timer running? Only while there is something to back up.
+    swap_armed: bool = false,
     last_click: ?struct { at: Io.Timestamp, pos: Pos, count: u8 } = null,
 
     cfg: config.Config = .{},
@@ -1022,13 +1026,19 @@ pub const App = struct {
         return std.mem.eql(u8, std.mem.trim(u8, got, " \n"), "iro");
     }
 
-    fn writeSwap(self: *App, d: *Doc) void {
-        const swap = d.swap_path orelse return;
+    /// Does `d` hold a change its recovery file doesn't know yet?
+    fn swapDue(d: *const Doc) bool {
+        if (d.swap_path == null) return false;
         // As long as an old backup has not been offered or the question about
         // it has not been answered, it stays untouched.
-        if (!d.recover_checked or d.recover_text != null) return;
+        if (!d.recover_checked or d.recover_text != null) return false;
+        return d.ed.revision() != d.swapped_rev;
+    }
+
+    fn writeSwap(self: *App, d: *Doc) void {
+        if (!swapDue(d)) return;
+        const swap = d.swap_path.?;
         const rev = d.ed.revision();
-        if (rev == d.swapped_rev) return;
         if (!d.ed.isModified()) return self.removeSwap(d);
 
         const body = fileio.encode(self.gpa, &d.ed.buf, d.meta) catch return;
@@ -3448,10 +3458,31 @@ fn resolvePath(gpa: Allocator, io: Io, arg: []const u8) ![]u8 {
     return std.fs.path.join(gpa, &.{ buf[0..n], arg });
 }
 
-fn ticker(loop: *Loop, io: Io) void {
+fn colorTicker(loop: *Loop, io: Io) void {
     while (true) {
-        io.sleep(.fromSeconds(2), .awake) catch return;
-        loop.postEvent(.tick) catch return;
+        io.sleep(.fromSeconds(10), .awake) catch return;
+        loop.postEvent(.color_tick) catch return;
+    }
+}
+
+fn swapTimer(loop: *Loop, io: Io) void {
+    io.sleep(.fromSeconds(2), .awake) catch return;
+    loop.postEvent(.tick) catch {};
+}
+
+/// Starts the recovery timer once a tab holds a change its recovery file
+/// doesn't know yet. With nothing unsaved, there is nothing to wake up for.
+fn armSwapTimer(app: *App, timers: *Io.Group, loop: *Loop, io: Io) void {
+    if (app.swap_armed) return;
+    for (app.docs.items) |doc| {
+        if (!App.swapDue(doc)) continue;
+        timers.concurrent(io, swapTimer, .{ loop, io }) catch {
+            // No thread to wait with: back up right away instead.
+            for (app.docs.items) |d| app.writeSwap(d);
+            return;
+        };
+        app.swap_armed = true;
+        return;
     }
 }
 
@@ -3748,10 +3779,13 @@ pub fn main(init: std.process.Init) !void {
     };
     app.updateTitle();
 
-    var tick_task = try io.concurrent(ticker, .{ &loop, io });
-    defer tick_task.cancel(io);
+    var color_task = try io.concurrent(colorTicker, .{ &loop, io });
+    defer color_task.cancel(io);
+    var swap_timers: Io.Group = .init;
+    defer swap_timers.cancel(io);
 
     while (!app.should_quit) {
+        armSwapTimer(&app, &swap_timers, &loop, io);
         const event = if (app.isAnimating()) blk: {
             if (try loop.tryEvent()) |ev| break :blk ev;
             io.sleep(.fromMilliseconds(16), .awake) catch {};
@@ -3794,12 +3828,13 @@ pub fn main(init: std.process.Init) !void {
                 if (app.palette == null) continue;
             },
             .tick => {
+                app.swap_armed = false;
                 for (app.docs.items) |doc| app.writeSwap(doc);
-                // Every ten seconds, check whether the wallpaper (and with it
-                // the terminal palette) has changed.
-                app.color_tick +%= 1;
-                if (app.color_tick % 5 == 0) app.queryColors();
                 continue; // nothing changes on screen
+            },
+            .color_tick => {
+                app.queryColors();
+                continue;
             },
         }
         draw_mod.draw(&app);
