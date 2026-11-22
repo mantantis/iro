@@ -1633,7 +1633,8 @@ extern "c" fn lua_getallocf(L: *lua_State, ud: *?*anyopaque) lua_Alloc;
 
 /// Opens only what a config needs: base functions, strings, tables, math and a
 /// few harmless queries (environment variables, time). Starting programs,
-/// touching files or loading code is not possible.
+/// touching files or loading code is not possible. `print` is gone too: it
+/// would write straight into the terminal, past everything that cleans text up.
 fn openSafeLibs(L: *lua_State) void {
     const Lib = struct { name: [*:0]const u8, open: lua_CFunction };
     const libs = [_]Lib{
@@ -1648,10 +1649,15 @@ fn openSafeLibs(L: *lua_State) void {
         luaL_requiref(L, lib.name, lib.open, 1);
         luaPop(L, 1);
     }
-    for ([_][*:0]const u8{ "dofile", "loadfile", "load", "require", "collectgarbage" }) |name| {
+    for ([_][*:0]const u8{ "dofile", "loadfile", "load", "require", "collectgarbage", "print" }) |name| {
         lua_pushnil(L);
         lua_setglobal(L, name);
     }
+    // Turns functions into bytecode. Useless without `load`, so it goes as well.
+    _ = lua_getglobal(L, "string");
+    lua_pushnil(L);
+    lua_setfield(L, -2, "dump");
+    luaPop(L, 1);
     _ = lua_getglobal(L, "os");
     for ([_][*:0]const u8{ "execute", "remove", "rename", "exit", "tmpname", "setlocale" }) |name| {
         lua_pushnil(L);
@@ -1934,7 +1940,7 @@ test "config on a leash: endless loop, metatables, blocked functions" {
         defer cfg.deinit(gpa);
         try std.testing.expect(cfg.fatal_lua);
     }
-    inline for (.{ "os.execute('true')", "io.open('/etc/passwd')", "require('os')", "dofile('/etc/passwd')", "load('return 1')" }) |src| {
+    inline for (.{ "os.execute('true')", "io.open('/etc/passwd')", "require('os')", "dofile('/etc/passwd')", "load('return 1')", "print('\x1b[2J')", "string.dump(function() end)" }) |src| {
         var cfg = try Config.loadFromSlice(gpa, src);
         defer cfg.deinit(gpa);
         try std.testing.expect(cfg.fatal_lua);
