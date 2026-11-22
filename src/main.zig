@@ -44,6 +44,9 @@ const Event = union(enum) {
     /// Fires every ten seconds: has the wallpaper (and with it the terminal
     /// palette) changed?
     color_tick,
+    /// The terminal window has the focus again: did another program change a
+    /// file in the meantime?
+    focus_in,
     /// The file index has found something new (comes from a worker thread).
     index_progress,
 };
@@ -184,6 +187,11 @@ pub const Doc = struct {
     /// Another iro already has this file open (its PID, 0 if unknown). This
     /// tab is then read-only and leaves the other one's backup alone.
     foreign: ?u32 = null,
+    /// Disk state of an outside change already reported for this tab, so the
+    /// warning comes once and not on every return to iro.
+    outside_seen: @FieldType(fileio.Meta, "disk") = null,
+    /// The file has vanished from disk, and iro has said so.
+    gone_noted: bool = false,
 
     /// Takes ownership of `ed` and `path`. If creation fails, both still belong to the caller.
     fn create(gpa: Allocator, ed: Editor, meta: fileio.Meta, path: ?[]u8) Allocator.Error!*Doc {
@@ -1302,7 +1310,9 @@ pub const App = struct {
             self.d.recover_checked = true;
             self.checkRecovery();
         }
-        self.sayForeign();
+        // Coming back to a tab is a good moment to look at its file again.
+        const outside = self.checkOutside(self.d);
+        if (outside != .none) self.sayOutside(outside, self.d) else self.sayForeign();
         self.updateTitle();
     }
 
@@ -2049,6 +2059,137 @@ pub const App = struct {
         self.d.follow = true;
         const ago = self.agoText(self.frame.allocator(), Io.Timestamp.now(self.io, .real).nanoseconds - v.written_ns);
         self.say(false, "Stand von {s} zurückgeholt. {s} behält ihn, {s} nimmt ihn zurück.", "Brought back the state from {s}. {s} keeps it, {s} takes it back.", .{ ago, self.cfg.keyLabel(.save), self.cfg.keyLabel(.undo) });
+    }
+
+    // ───────────── Changes from outside ─────────────
+
+    const Outside = enum { none, reloaded, conflict, gone, unreadable };
+    const Reload = enum { same, replaced, failed };
+
+    /// Has another program changed or removed `d`'s file? An untouched tab
+    /// takes the new content as one undo step. A tab with unsaved work is
+    /// left alone and only reported, once per change.
+    fn checkOutside(self: *App, d: *Doc) Outside {
+        const path = d.path orelse return .none;
+        const known = d.meta.disk orelse return .none; // not on disk yet
+        const now = fileio.diskState(self.io, Io.Dir.cwd(), path) orelse {
+            if (d.gone_noted) return .none;
+            d.gone_noted = true;
+            return .gone;
+        };
+        d.gone_noted = false;
+        if (std.meta.eql(now, known)) return .none;
+        if (d.outside_seen) |seen| if (std.meta.eql(seen, now)) return .none;
+        if (d.ed.isModified()) {
+            d.outside_seen = now;
+            return .conflict;
+        }
+        return switch (self.reloadDoc(d)) {
+            .same => .none,
+            .replaced => .reloaded,
+            .failed => blk: {
+                d.outside_seen = now;
+                break :blk .unreadable;
+            },
+        };
+    }
+
+    /// Back in iro: looks at every tab's file once and says what matters most.
+    /// Returns whether anything is worth a redraw.
+    fn checkAllOutside(self: *App) bool {
+        var reloaded: usize = 0;
+        var last: ?*Doc = null;
+        var alert: ?struct { kind: Outside, doc: *Doc } = null;
+        for (self.docs.items) |d| {
+            switch (self.checkOutside(d)) {
+                .none => {},
+                .reloaded => {
+                    reloaded += 1;
+                    last = d;
+                },
+                else => |k| if (alert == null or k == .conflict) {
+                    alert = .{ .kind = k, .doc = d };
+                },
+            }
+        }
+        if (alert) |a| {
+            self.sayOutside(a.kind, a.doc);
+        } else if (reloaded == 1) {
+            self.sayOutside(.reloaded, last.?);
+        } else if (reloaded > 1) {
+            self.say(false, "{d} Dateien von außen geändert, neu geladen", "{d} files changed outside iro, reloaded", .{reloaded});
+        }
+        return alert != null or reloaded > 0;
+    }
+
+    fn sayOutside(self: *App, kind: Outside, d: *Doc) void {
+        const name = d.name();
+        switch (kind) {
+            .none => {},
+            .reloaded => if (d == self.d) {
+                self.say(false, "{s} von außen geändert, neu geladen · {s} holt den alten Stand", "{s} changed outside iro, reloaded · {s} brings back the old text", .{ name, self.cfg.keyLabel(.undo) });
+            } else {
+                self.say(false, "{s} von außen geändert, neu geladen", "{s} changed outside iro, reloaded", .{name});
+            },
+            .conflict => self.say(true, "Achtung: {s} wurde auch von außen geändert. Beim Speichern fragt iro nach.", "Careful: {s} was also changed outside iro. iro asks when you save.", .{name}),
+            .gone => self.say(true, "{s} gibt es nicht mehr auf der Platte. {s} legt die Datei neu an.", "{s} is gone from disk. {s} writes it again.", .{ name, self.cfg.keyLabel(.save) }),
+            .unreadable => self.say(true, "{s} wurde von außen geändert, lässt sich aber nicht neu laden", "{s} changed outside iro but cannot be reloaded", .{name}),
+        }
+    }
+
+    /// Replaces the text of `d` with the file on disk, as one undo step: Ctrl+Z
+    /// brings back what was there before. Afterwards the tab counts as saved.
+    fn reloadDoc(self: *App, d: *Doc) Reload {
+        const gpa = self.gpa;
+        const path = d.path orelse return .failed;
+        var loaded = fileio.load(gpa, self.io, Io.Dir.cwd(), path) catch return .failed;
+        defer loaded.buf.deinit();
+        const txt = loaded.buf.toBytes(gpa, "\n") catch return .failed;
+        defer gpa.free(txt);
+        const mine = d.ed.buf.toBytes(gpa, "\n") catch return .failed;
+        defer gpa.free(mine);
+
+        d.outside_seen = null;
+        if (std.mem.eql(u8, txt, mine)) {
+            // Only the time stamp moved (touch, a save without changes).
+            d.meta = loaded.meta;
+            d.ed.markSaved();
+            return .same;
+        }
+        const at = d.ed.cursor;
+        d.ed.replaceText(txt) catch return .failed;
+        d.ed.setCursor(at, false);
+        d.ed.markSaved();
+        d.meta = loaded.meta;
+        self.loadGitBase(d);
+        return .replaced;
+    }
+
+    /// "[L]oad" at the overwrite question: the file on disk wins. The unsaved
+    /// text goes into the history first and stays one Ctrl+Z away anyway.
+    fn loadOverMine(self: *App) void {
+        const gpa = self.gpa;
+        const d = self.d;
+        const path = d.path orelse return;
+        var kept = false;
+        if (self.cfg.history) {
+            var root_buf: [Io.Dir.max_path_bytes]u8 = undefined;
+            if (self.statePath(&root_buf, "history")) |root| {
+                if (fileio.encode(gpa, &d.ed.buf, d.meta)) |bytes| {
+                    defer gpa.free(bytes);
+                    kept = iro.history.keepBytes(gpa, self.io, root, path, bytes) catch false;
+                } else |_| {}
+            }
+        }
+        switch (self.reloadDoc(d)) {
+            .failed => self.say(true, "{s} lässt sich nicht laden", "{s} cannot be loaded", .{d.name()}),
+            .same => self.say(false, "Auf der Platte steht dasselbe wie bei dir", "The disk holds the same text as you", .{}),
+            .replaced => if (kept) {
+                self.say(false, "Neu geladen. Dein Stand: {s} oder {s}", "Reloaded. Your text: {s} or {s}", .{ self.cfg.keyLabel(.undo), self.cfg.keyLabel(.history) });
+            } else {
+                self.say(false, "Neu geladen. {s} holt deinen Stand zurück", "Reloaded. {s} brings your text back", .{self.cfg.keyLabel(.undo)});
+            },
+        }
     }
 
     // ───────────── File search: index, scopes, recent list ─────────────
@@ -2998,6 +3139,10 @@ pub const App = struct {
                 if (self.yes(key)) {
                     self.closePrompt();
                     self.save(true);
+                } else if (key.matches('l', .{})) {
+                    self.closePrompt();
+                    self.after_save = .stay;
+                    self.loadOverMine();
                 } else if (cp == Key.escape or key.matches('n', .{})) {
                     self.closePrompt();
                     self.after_save = .stay;
@@ -4028,6 +4173,7 @@ pub fn main(init: std.process.Init) !void {
                 app.queryColors();
                 continue;
             },
+            .focus_in => if (!app.checkAllOutside()) continue,
         }
         draw_mod.draw(&app);
         try vx.render(writer);

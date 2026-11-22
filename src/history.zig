@@ -57,7 +57,22 @@ pub fn keep(gpa: Allocator, io: Io, root: []const u8, path: []const u8) !void {
     if (!wanted(path, @intCast(st.permissions.toMode() & 0o777))) return;
     const old = cwd.readFileAlloc(io, path, gpa, .limited(max_size)) catch return;
     defer gpa.free(old);
+    try store(gpa, io, root, path, old, st.mtime.nanoseconds);
+}
 
+/// Puts `bytes` (unsaved text that is about to be replaced, say) into the
+/// history of `path`, stamped with the current time. Same rules as `keep`.
+/// Returns whether a copy exists afterwards.
+pub fn keepBytes(gpa: Allocator, io: Io, root: []const u8, path: []const u8, bytes: []const u8) !bool {
+    if (bytes.len > max_size) return false;
+    const mode: u32 = if (Io.Dir.cwd().statFile(io, path, .{})) |st| @intCast(st.permissions.toMode() & 0o777) else |_| 0o644;
+    if (!wanted(path, mode)) return false;
+    try store(gpa, io, root, path, bytes, Io.Timestamp.now(io, .real).nanoseconds);
+    return true;
+}
+
+fn store(gpa: Allocator, io: Io, root: []const u8, path: []const u8, old: []const u8, written_ns: i96) !void {
+    const cwd = Io.Dir.cwd();
     var dir_buf: [Io.Dir.max_path_bytes]u8 = undefined;
     const dir_path = dirFor(&dir_buf, root, path) orelse return;
     try cwd.createDirPath(io, dir_path);
@@ -77,7 +92,7 @@ pub fn keep(gpa: Allocator, io: Io, root: []const u8, path: []const u8) !void {
     }
 
     var name_buf: [32]u8 = undefined;
-    const written: u96 = @intCast(@max(st.mtime.nanoseconds, 0));
+    const written: u96 = @intCast(@max(written_ns, 0));
     const name = std.fmt.bufPrint(&name_buf, "{d:0>24}" ++ ext, .{written}) catch return;
     try fileio.writeAtomicMode(io, dir, name, old, fileio.private_file);
     // For humans looking into the folder: which file this is.
@@ -180,4 +195,32 @@ test "versions: kept before saving, deduplicated, capped" {
     const oldest = try read(gpa, io, root, file, versions[versions.len - 1]);
     defer gpa.free(oldest);
     try testing.expectEqualStrings("stand 5\n", oldest);
+}
+
+test "unsaved text can be kept too, secrets excepted" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const io = testing.io;
+    const gpa = testing.allocator;
+
+    var buf: [Io.Dir.max_path_bytes]u8 = undefined;
+    const n = try tmp.dir.realPath(io, &buf);
+    const root = try std.fs.path.join(gpa, &.{ buf[0..n], "history" });
+    defer gpa.free(root);
+    const file = try std.fs.path.join(gpa, &.{ buf[0..n], "b.conf" });
+    defer gpa.free(file);
+    const secret = try std.fs.path.join(gpa, &.{ buf[0..n], ".env" });
+    defer gpa.free(secret);
+
+    try testing.expect(try keepBytes(gpa, io, root, file, "noch nicht gespeichert\n"));
+    try testing.expect(!try keepBytes(gpa, io, root, secret, "TOKEN=geheim\n"));
+
+    var arena: std.heap.ArenaAllocator = .init(gpa);
+    defer arena.deinit();
+    const versions = try list(arena.allocator(), io, root, file);
+    try testing.expectEqual(@as(usize, 1), versions.len);
+    const got = try read(gpa, io, root, file, versions[0]);
+    defer gpa.free(got);
+    try testing.expectEqualStrings("noch nicht gespeichert\n", got);
+    try testing.expectEqual(@as(usize, 0), (try list(arena.allocator(), io, root, secret)).len);
 }

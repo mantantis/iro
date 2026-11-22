@@ -88,8 +88,9 @@ jederzeit, und die Tasten bleiben in beiden Gängen gleich.
 - **Frühere Versionen:** Vor jedem Speichern wandert der alte Stand in einen lokalen
   Verlauf, die letzten 20 pro Datei. Alt+R holt einen zurück. Geheimnisse bekommen
   keine Kopien.
-- **Auf der Platte geändert?** iro sagt Bescheid, bevor es fremde Änderungen
-  überschreibt.
+- **Auf der Platte geändert?** Kommst du zurück zu iro, sind unveränderte Tabs schon
+  auf dem neuen Stand. Mit Ungespeichertem warnt iro und lässt dich wählen:
+  überschreiben oder die Fassung von der Platte laden.
 - **Doppelt offen?** Das zweite iro liest nur mit, keins überschreibt das andere.
   Kein Fehlalarm nach einem Absturz.
 - „Speichern unter“ ersetzt nie stillschweigend eine vorhandene Datei.

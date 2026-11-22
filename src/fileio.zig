@@ -126,7 +126,8 @@ pub fn load(gpa: Allocator, io: Io, dir: Io.Dir, path: []const u8) !Loaded {
     return loaded;
 }
 
-fn diskState(io: Io, dir: Io.Dir, path: []const u8) @FieldType(Meta, "disk") {
+/// Modification time and size of the file right now, `null` if it is gone.
+pub fn diskState(io: Io, dir: Io.Dir, path: []const u8) @FieldType(Meta, "disk") {
     const st = dir.statFile(io, path, .{}) catch return null;
     return .{ .mtime = st.mtime, .size = st.size };
 }

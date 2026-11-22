@@ -84,7 +84,9 @@ keys never change between gears.
   up within two seconds and offered back after a crash or a closed terminal.
 - **Earlier versions:** before every save, the old state goes into a local history,
   the last 20 per file. Alt+R brings one back. Secrets get no copies.
-- **Changed on disk?** iro tells you before it overwrites someone else's edit.
+- **Changed on disk?** Come back to iro and untouched tabs are already up to date.
+  With unsaved work, iro warns you and lets you pick: overwrite, or load the disk
+  version.
 - **Open twice?** The second iro only reads along, so neither overwrites the other.
   No stale-lock nagging after a crash.
 - “Save as” never silently replaces an existing file.
