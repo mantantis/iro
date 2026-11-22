@@ -12,6 +12,8 @@
 ![Zig](https://img.shields.io/badge/Zig-0.17-f7a41d?logo=zig&logoColor=white)
 ![Lua](https://img.shields.io/badge/config-Lua%205.4-2c2d72?logo=lua&logoColor=white)
 ![Platform](https://img.shields.io/badge/platform-Linux-informational?logo=linux&logoColor=white)
+![Made on Arch](https://img.shields.io/badge/made%20on-Arch-1793D1?logo=archlinux&logoColor=white)
+![Best in kitty](https://img.shields.io/badge/best%20in-kitty-informational)
 ![License](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)
 
 **English** · [Deutsch](README.de.md)
@@ -51,7 +53,7 @@ Most editing is one of two jobs, so iro has two gears:
 
 | | Gear | Motto | What you get |
 |---|---|---|---|
-| ✂️ | **Blade** | *Get in. Cut. Get out.* | **Config edit mode: simple and fast.** Just the text, nothing running in the background. Perfect for a quick fix to `hyprland.conf` or `/etc/fstab`. |
+| ✂️ | **Blade** | *Get in. Cut. Get out.* | **Config edit mode: simple and fast.** Just the text, nothing running in the background. Perfect for a quick fix to `hyprland.lua` or `/etc/fstab`. |
 | ⚒️ | **Forge** | *Heat up. Hammer. Ship it.* | File tree, minimap, git gutter, project-wide file search. For actually writing code. |
 
 iro **picks the gear for you**: open a file and you land in Blade, open a folder
@@ -62,10 +64,12 @@ keys never change between gears.
 
 - **Follows your wallpaper.** iro reads the terminal's own palette, so when your
   wallpaper tool recolours the terminal, iro recolours with it. Live.
-- **17 built-in themes** if you prefer a fixed look, including two retro ones
+- **16 built-in themes** if you prefer a fixed look, including two retro ones
   (green phosphor and amber CRT).
 - Cursor line, git gutter, indent guides, bracket pairs, a **Braille minimap**,
   smooth little animations and Nerd Font icons.
+- **kitty native.** Logo on the start screen, every key combo. Other terminals get
+  the plain cut.
 - **Idle means idle.** No redraws, no busy loops, just a wallpaper sync every
   ten seconds.
 - Everything can be switched off individually. Tasteful is the point, not a
@@ -74,10 +78,10 @@ keys never change between gears.
 ### 🛟 Paranoid about your data
 
 - **Atomic saves:** write to a temporary file, sync, then rename. A crash mid-save
-  leaves the old file intact. Permissions, owner and group, ACLs, hard links and
-  symlinks survive.
+  leaves the old file intact. Permissions, owner and group, ACLs and symlinks
+  survive. Hard-linked files are written in place, so their links hold.
 - **Crash recovery:** unsaved work, even in tabs without a file name, is backed
-  up every two seconds and offered back after a crash or a closed terminal.
+  up within two seconds and offered back after a crash or a closed terminal.
 - **Earlier versions:** before every save, the old state goes into a local history,
   the last 20 per file. Alt+R brings one back. Secrets get no copies.
 - **Changed on disk?** iro tells you before it overwrites someone else's edit.
@@ -134,10 +138,8 @@ zig build --prefix ~/.local    # installs ~/.local/bin/iro
 
 On Arch there is also a `PKGBUILD`: `makepkg -si`.
 
-Optional at runtime: `wl-clipboard` (system clipboard), `glib2` (trash),
+Optional at runtime: `wl-clipboard` (Wayland clipboard), `glib2` (trash),
 `zoxide` (Alt+Z), `git` (git gutter), a Nerd Font (icons).
-iro looks its best in **kitty** (images, colours, extra keys); other terminals get a
-plainer look with full functionality.
 
 ## Keys
 
@@ -173,7 +175,7 @@ keys = { tree = "Ctrl+E", replace = "Ctrl+H" }
 colors = { accent = "#00E5FF" }
 ```
 
-No `init.lua` yet? Ctrl+P → “Open settings file” creates a commented one.
+No `init.lua` yet? Ctrl+P → “Open settings file (init.lua)” creates a commented one.
 Changes apply on save.
 
 ## Roadmap

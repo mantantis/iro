@@ -12,6 +12,8 @@
 ![Zig](https://img.shields.io/badge/Zig-0.17-f7a41d?logo=zig&logoColor=white)
 ![Lua](https://img.shields.io/badge/config-Lua%205.4-2c2d72?logo=lua&logoColor=white)
 ![Platform](https://img.shields.io/badge/platform-Linux-informational?logo=linux&logoColor=white)
+![Made on Arch](https://img.shields.io/badge/made%20on-Arch-1793D1?logo=archlinux&logoColor=white)
+![Best in kitty](https://img.shields.io/badge/best%20in-kitty-informational)
 ![License](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)
 
 [English](README.md) · **Deutsch**
@@ -53,7 +55,7 @@ Die meiste Arbeit im Editor ist eine von zwei Sorten, deshalb hat iro zwei Gäng
 
 | | Gear | Motto | Was du bekommst |
 |---|---|---|---|
-| ✂️ | **Blade** | *Get in. Cut. Get out.* | **Config-Modus: einfach und schnell.** Nur der Text, im Hintergrund läuft nichts. Ideal für eine schnelle Korrektur an `hyprland.conf` oder `/etc/fstab`. |
+| ✂️ | **Blade** | *Get in. Cut. Get out.* | **Config-Modus: einfach und schnell.** Nur der Text, im Hintergrund läuft nichts. Ideal für eine schnelle Korrektur an `hyprland.lua` oder `/etc/fstab`. |
 | ⚒️ | **Forge** | *Heat up. Hammer. Ship it.* | Dateibaum, Minimap, Git-Spalte, projektweite Dateisuche. Zum richtigen Programmieren. |
 
 iro **wählt den Gang selbst**: Öffnest du eine Datei, landest du in Blade;
@@ -64,10 +66,12 @@ jederzeit, und die Tasten bleiben in beiden Gängen gleich.
 
 - **Folgt deinem Wallpaper.** iro liest die Palette des Terminals. Färbt dein
   Wallpaper-Werkzeug das Terminal um, färbt sich iro mit. Live.
-- **17 fertige Farbsätze** für alle, die es fest mögen, darunter zwei Retro-Sätze
+- **16 fertige Farbsätze** für alle, die es fest mögen, darunter zwei Retro-Sätze
   (grüner Phosphor- und Bernstein-Röhrenmonitor).
 - Cursorzeile, Git-Spalte, Einrückhilfen, Klammer-Paare, eine **Braille-Minimap**,
   kleine weiche Animationen und Nerd-Font-Symbole.
+- **kitty-nativ.** Logo auf der Startseite, jede Tastenkombination. Andere Terminals
+  bekommen die schlichte Fassung.
 - **Leerlauf heißt Leerlauf.** Kein Neuzeichnen, keine Dauerschleife, nur alle zehn
   Sekunden ein Wallpaper-Sync.
 - Alles einzeln abschaltbar. Geschmackvoll ist das Ziel, nicht Kirmes.
@@ -76,9 +80,10 @@ jederzeit, und die Tasten bleiben in beiden Gängen gleich.
 
 - **Atomares Speichern:** erst in eine Zwischendatei schreiben, synchronisieren,
   dann umbenennen. Ein Absturz mitten im Speichern lässt die alte Datei heil.
-  Rechte, Besitzer und Gruppe, ACLs, Hardlinks und Symlinks bleiben erhalten.
+  Rechte, Besitzer und Gruppe, ACLs und Symlinks bleiben erhalten. Dateien mit
+  Hardlinks schreibt iro direkt, damit die Links halten.
 - **Wiederherstellung nach Absturz:** Ungespeichertes, auch in Tabs ohne
-  Dateinamen, wird alle zwei Sekunden gesichert und nach einem Absturz oder einem
+  Dateinamen, wird binnen zwei Sekunden gesichert und nach einem Absturz oder einem
   geschlossenen Terminal wieder angeboten.
 - **Frühere Versionen:** Vor jedem Speichern wandert der alte Stand in einen lokalen
   Verlauf, die letzten 20 pro Datei. Alt+R holt einen zurück. Geheimnisse bekommen
@@ -144,10 +149,8 @@ zig build --prefix ~/.local    # installiert ~/.local/bin/iro
 
 Unter Arch gibt es auch ein `PKGBUILD`: `makepkg -si`.
 
-Optional zur Laufzeit: `wl-clipboard` (System-Zwischenablage), `glib2`
+Optional zur Laufzeit: `wl-clipboard` (Wayland-Zwischenablage), `glib2`
 (Papierkorb), `zoxide` (Alt+Z), `git` (Git-Spalte), eine Nerd-Schrift (Symbole).
-Am schönsten ist iro in **kitty** (Bilder, Farben, zusätzliche Tasten); andere
-Terminals bekommen eine schlichtere Optik bei vollem Funktionsumfang.
 
 ## Tasten
 
@@ -184,9 +187,7 @@ colors = { accent = "#00E5FF" }
 ```
 
 Noch keine `init.lua`? Strg+P → „Einstellungen öffnen (init.lua)“ legt eine
-kommentierte an. Änderungen gelten beim Speichern. Die deutschen Namen
-älterer Versionen (`tab_breite`, `thema`, `tasten`, `farben` …) versteht iro
-weiterhin.
+kommentierte an. Änderungen gelten beim Speichern.
 
 ## Roadmap
 
