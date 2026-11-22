@@ -16,6 +16,8 @@ All notable changes to iro are documented here. The format follows
 ### Changed
 - Saving keeps owner, group, ACLs and hard links intact.
 - iro only wakes up when there is work to do.
+- External helpers (`git`, `wl-paste`, `gio`, `zoxide`) time out after two
+  seconds so a stuck clipboard or dead mount cannot freeze iro.
 
 ### Security
 - The config sandbox no longer offers `print` and `string.dump`.

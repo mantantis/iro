@@ -682,11 +682,13 @@ pub const App = struct {
         const dir = std.fs.path.dirname(path) orelse return;
         const spec = std.fmt.allocPrint(gpa, "HEAD:./{s}", .{std.fs.path.basename(path)}) catch return;
         defer gpa.free(spec);
-        const result = std.process.run(gpa, self.io, .{
-            .argv = &.{ "git", "--no-optional-locks", "-C", dir, "cat-file", "blob", spec },
-            .stdout_limit = .limited(8 * 1024 * 1024),
-            .stderr_limit = .limited(64 * 1024),
-        }) catch return;
+        const result = fileio.runHelper(
+            gpa,
+            self.io,
+            &.{ "git", "--no-optional-locks", "-C", dir, "cat-file", "blob", spec },
+            .limited(8 * 1024 * 1024),
+            .limited(64 * 1024),
+        ) catch return;
         gpa.free(result.stderr);
         const ok = result.term == .exited and result.term.exited == 0 and std.unicode.utf8ValidateSlice(result.stdout);
         if (!ok) return gpa.free(result.stdout);
@@ -1725,11 +1727,16 @@ pub const App = struct {
         const gpa = self.gpa;
         const path = self.tree_target orelse return;
         const name = std.fs.path.basename(path);
-        const result = std.process.run(gpa, self.io, .{
-            .argv = &.{ "gio", "trash", "--", path },
-            .stdout_limit = .limited(64 * 1024),
-            .stderr_limit = .limited(64 * 1024),
-        }) catch return self.say(true, "Papierkorb nicht erreichbar: gio fehlt (Paket glib2)", "Trash not available: gio is missing (package glib2)", .{});
+        const result = fileio.runHelper(
+            gpa,
+            self.io,
+            &.{ "gio", "trash", "--", path },
+            .limited(64 * 1024),
+            .limited(64 * 1024),
+        ) catch |err| return switch (err) {
+            error.Timeout => self.say(true, "Papierkorb antwortet nicht (Zeitüberschreitung)", "Trash is not responding (timed out)", .{}),
+            else => self.say(true, "Papierkorb nicht erreichbar: gio fehlt (Paket glib2)", "Trash not available: gio is missing (package glib2)", .{}),
+        };
         defer gpa.free(result.stdout);
         defer gpa.free(result.stderr);
         if (!(result.term == .exited and result.term.exited == 0)) {
@@ -1876,10 +1883,13 @@ pub const App = struct {
             &.{ "wl-paste", "--primary", "--no-newline" }
         else
             &.{ "wl-paste", "--no-newline" };
-        const result = std.process.run(self.gpa, self.io, .{
-            .argv = argv,
-            .stdout_limit = .limited(64 * 1024 * 1024),
-        }) catch null;
+        const result = fileio.runHelper(
+            self.gpa,
+            self.io,
+            argv,
+            .limited(64 * 1024 * 1024),
+            .limited(64 * 1024),
+        ) catch null;
         if (result) |r| {
             defer self.gpa.free(r.stdout);
             defer self.gpa.free(r.stderr);
@@ -1956,10 +1966,13 @@ pub const App = struct {
                 return;
             },
             .dirs => {
-                const result = std.process.run(self.gpa, self.io, .{
-                    .argv = &.{ "zoxide", "query", "--list" },
-                    .stdout_limit = .limited(4 * 1024 * 1024),
-                }) catch {
+                const result = fileio.runHelper(
+                    self.gpa,
+                    self.io,
+                    &.{ "zoxide", "query", "--list" },
+                    .limited(4 * 1024 * 1024),
+                    .limited(64 * 1024),
+                ) catch {
                     pal.arena.deinit();
                     return self.say(true, "zoxide ist nicht installiert oder antwortet nicht", "zoxide is not installed or not responding", .{});
                 };

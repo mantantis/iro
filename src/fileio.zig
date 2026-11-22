@@ -132,6 +132,42 @@ pub fn diskState(io: Io, dir: Io.Dir, path: []const u8) @FieldType(Meta, "disk")
     return .{ .mtime = st.mtime, .size = st.size };
 }
 
+/// How long an external helper (`git`, `wl-paste`, `gio`, `zoxide`) may take
+/// before iro gives up and kills it, so a hung clipboard or dead mount cannot
+/// freeze the editor.
+pub const helper_timeout_ms: i64 = 2_000;
+
+/// Runs a short-lived helper program with output limits and a fixed deadline.
+pub fn runHelper(
+    gpa: Allocator,
+    io: Io,
+    argv: []const []const u8,
+    stdout_limit: Io.Limit,
+    stderr_limit: Io.Limit,
+) std.process.RunError!std.process.RunResult {
+    return runBounded(gpa, io, argv, stdout_limit, stderr_limit, helper_timeout_ms);
+}
+
+pub fn runBounded(
+    gpa: Allocator,
+    io: Io,
+    argv: []const []const u8,
+    stdout_limit: Io.Limit,
+    stderr_limit: Io.Limit,
+    timeout_ms: i64,
+) std.process.RunError!std.process.RunResult {
+    const timeout: Io.Timeout = .{ .duration = .{
+        .clock = .awake,
+        .raw = .fromMilliseconds(timeout_ms),
+    } };
+    return std.process.run(gpa, io, .{
+        .argv = argv,
+        .stdout_limit = stdout_limit,
+        .stderr_limit = stderr_limit,
+        .timeout = timeout.toDeadline(io),
+    });
+}
+
 /// Has another program changed the file since the last load or save?
 pub fn changedOnDisk(io: Io, dir: Io.Dir, path: []const u8, meta: Meta) bool {
     const known = meta.disk orelse return false;
@@ -489,4 +525,19 @@ test "group survives saving" {
     try writeAtomic(io, tmp.dir, "geteilt.conf", "neu\n");
     const after = ownerOf(linux.AT.FDCWD, &path, 0).?;
     try testing.expectEqual(other, after.gid);
+}
+
+test "hung helper program times out and is killed" {
+    const io = testing.io;
+    try testing.expectError(
+        error.Timeout,
+        runBounded(
+            testing.allocator,
+            io,
+            &.{ "sh", "-c", "printf hallo; exec sleep 10" },
+            .limited(1024),
+            .limited(1024),
+            40,
+        ),
+    );
 }
