@@ -223,7 +223,7 @@ Terminal-Darstellung mit [libvaxis](https://github.com/rockorager/libvaxis).
 
 Gefällt dir iro? Trinkgeld fließt direkt in Kaffee und KI-Tokens:
 
-<a href="https://ko-fi.com/mausmann"><img src="assets/kofi.gif" alt="Support me on Ko-fi" height="36"></a>
+<a href="https://ko-fi.com/mausmann" title="Support me on Ko-fi"><img src="assets/kofi.gif" alt="Support me on Ko-fi" height="148"></a>
 
 ## Lizenz
 
