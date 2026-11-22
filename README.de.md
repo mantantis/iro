@@ -21,7 +21,9 @@
 
 </div>
 
-<!-- TODO: Demo-GIF kommt hierher -->
+<p align="center">
+  <img src="assets/demo.gif" alt="iro-Demo: Startseite, Dateisuche, Blade-Modus mit Config Guard, automatischer Forge-Wechsel, Live-Farbsätze und Über-iro-Karte" width="880">
+</p>
 
 > **Frühe Alpha.** iro ist jung, entwickelt sich schnell und läuft bisher täglich
 > auf genau einem Arch-Laptop. Es gibt eine Testsuite, aber noch keine lange

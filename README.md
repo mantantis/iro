@@ -21,7 +21,9 @@
 
 </div>
 
-<!-- TODO: demo GIF goes here -->
+<p align="center">
+  <img src="assets/demo.gif" alt="iro demo: start screen, fuzzy file search, Blade mode with Config Guard, automatic Forge shift, live themes and About screen" width="880">
+</p>
 
 > **Early alpha.** iro is young, moves fast and is used daily on exactly one Arch
 > laptop so far. It has a test suite, but no track record yet. For configs that
