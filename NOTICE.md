@@ -57,7 +57,7 @@ without the obligations of the GPL, you need a separate commercial license from
 Mausmann. Such a license can only cover the rights Mausmann holds; it does not
 cover the third-party components listed below, which keep their own licenses.
 
-Contact: via GitHub, <https://github.com/mantantis>.
+Contact: <mailto:mausmann.dev@proton.me> (or via GitHub, <https://github.com/mantantis>).
 
 ## 5. Third-party components
 
@@ -119,4 +119,4 @@ Pflichten der GPL nutzen möchte, braucht eine gesonderte kommerzielle Lizenz vo
 Mausmann. Sie kann nur die Rechte umfassen, die Mausmann hält, nicht die oben
 genannten Fremdbausteine; diese behalten ihre eigenen Lizenzen.
 
-Kontakt: über GitHub, <https://github.com/mantantis>.
+Kontakt: <mailto:mausmann.dev@proton.me> (oder über GitHub, <https://github.com/mantantis>).
