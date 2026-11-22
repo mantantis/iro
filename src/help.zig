@@ -114,6 +114,7 @@ pub fn generate(arena: Allocator, cfg: *const config.Config) Allocator.Error![]c
         .{ .head = .{ .de = "Wenn etwas schiefgeht", .en = "When something goes wrong" }, .lines = &.{
             .{ .key = .{ .de = "Absturz", .en = "Crash" }, .say = .{ .de = "iro sichert alle zwei Sekunden. Beim nächsten Start bietet es den ungespeicherten Stand an, auch für Text ohne Dateinamen.", .en = "iro backs up every two seconds. On the next start it offers the unsaved state, even for text without a file name." } },
             .{ .key = .{ .de = "Fremde Änderung", .en = "Outside change" }, .say = .{ .de = "Hat ein anderes Programm die Datei inzwischen geändert, fragt iro vor dem Überschreiben.", .en = "If another program changed the file in the meantime, iro asks before overwriting." } },
+            .{ .key = .{ .de = "Doppelt offen", .en = "Open twice" }, .say = .{ .de = "Hat schon ein anderes iro die Datei offen, öffnet das zweite sie nur zum Lesen und nennt die PID des ersten. So überschreibt keins die Arbeit des anderen.", .en = "If another iro already has the file open, the second one opens it read-only and names the first one's PID. That way neither overwrites the other's work." } },
             .{ .key = .{ .de = "Fehler in init.lua", .en = "Error in init.lua" }, .say = .{ .de = "iro startet trotzdem und nennt unten die Zeile mit dem Fehler.", .en = "iro starts anyway and names the line with the error at the bottom." } },
         } },
     };

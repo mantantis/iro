@@ -79,6 +79,8 @@ keys never change between gears.
 - **Crash recovery:** unsaved work, even in tabs without a file name, is backed
   up every two seconds and offered back after a crash or a closed terminal.
 - **Changed on disk?** iro tells you before it overwrites someone else's edit.
+- **Open twice?** The second iro only reads along, so neither overwrites the other.
+  No stale-lock nagging after a crash.
 - “Save as” never silently replaces an existing file.
 
 ### 🔒 Secure by design

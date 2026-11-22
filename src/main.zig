@@ -174,6 +174,13 @@ pub const Doc = struct {
     /// Has it been checked whether anything is left over from a crash? Until
     /// then nobody may touch the recovery file.
     recover_checked: bool = false,
+    /// Lock on the file while this tab has it open, so a second iro notices.
+    /// It is an `flock`: if iro dies, the kernel lets go by itself.
+    lock_fd: ?std.os.linux.fd_t = null,
+    lock_path: ?[:0]u8 = null,
+    /// Another iro already has this file open (its PID, 0 if unknown). This
+    /// tab is then read-only and leaves the other one's backup alone.
+    foreign: ?u32 = null,
 
     /// Takes ownership of `ed` and `path`. If creation fails, both still belong to the caller.
     fn create(gpa: Allocator, ed: Editor, meta: fileio.Meta, path: ?[]u8) Allocator.Error!*Doc {
@@ -183,6 +190,7 @@ pub const Doc = struct {
     }
 
     fn destroy(self: *Doc, gpa: Allocator) void {
+        self.unlock(gpa);
         self.ed.deinit();
         if (self.path) |p| gpa.free(p);
         self.syn_states.deinit(gpa);
@@ -192,6 +200,20 @@ pub const Doc = struct {
         if (self.git_raw) |r| gpa.free(r);
         self.git_marks.deinit(gpa);
         gpa.destroy(self);
+    }
+
+    fn unlock(self: *Doc, gpa: Allocator) void {
+        const linux = std.os.linux;
+        const fd = self.lock_fd orelse return;
+        // Remove the file before letting go: whoever opens it next creates a
+        // fresh one instead of locking a file that is about to vanish.
+        if (self.lock_path) |p| {
+            _ = linux.unlink(p.ptr);
+            gpa.free(p);
+        }
+        _ = linux.close(fd);
+        self.lock_fd = null;
+        self.lock_path = null;
     }
 
     pub fn name(self: *const Doc) []const u8 {
@@ -841,6 +863,10 @@ pub const App = struct {
     /// nobody wonders why nothing happens.
     fn locked(self: *App) bool {
         if (!self.d.read_only) return false;
+        if (self.d.foreign != null) {
+            self.sayForeign();
+            return true;
+        }
         self.say(false, "Die Hilfe ist nur zum Lesen. {s} schließt sie.", "The help is read-only. {s} closes it.", .{self.cfg.keyLabel(.close_tab)});
         return true;
     }
@@ -927,6 +953,7 @@ pub const App = struct {
         cwd.setFilePermissions(self.io, state_dir, fileio.private_dir, .{}) catch {};
         if (self.d.path) |path| {
             self.d.swap_path = try std.fmt.allocPrint(self.gpa, "{s}/{x:0>16}.swap", .{ state_dir, std.hash.Wyhash.hash(0, path) });
+            self.lockDoc(self.d);
         } else {
             // Even a file without a name is backed up. The name records which
             // iro has it open, so a second one leaves it alone.
@@ -936,6 +963,57 @@ pub const App = struct {
                 self.d.scratch_id = std.mem.readInt(u64, &rnd, .little) | 1;
             }
             self.d.swap_path = try std.fmt.allocPrint(self.gpa, "{s}/" ++ scratch_prefix ++ "{d}-{x:0>16}.swap", .{ state_dir, std.os.linux.getpid(), self.d.scratch_id });
+        }
+    }
+
+    /// Takes the lock for `d`'s file (and lets go of an earlier one). If
+    /// another iro holds it, the tab becomes read-only.
+    fn lockDoc(self: *App, d: *Doc) void {
+        const linux = std.os.linux;
+        d.unlock(self.gpa);
+        d.foreign = null;
+        const file = d.path orelse return;
+        d.read_only = false;
+        var dir_buf: [Io.Dir.max_path_bytes]u8 = undefined;
+        const state_dir = self.statePath(&dir_buf, "swap") orelse return;
+        const path = std.fmt.allocPrintSentinel(self.gpa, "{s}/{x:0>16}.lock", .{ state_dir, std.hash.Wyhash.hash(0, file) }, 0) catch return;
+        const rc = linux.open(path.ptr, .{ .ACCMODE = .RDWR, .CREAT = true, .CLOEXEC = true }, 0o600);
+        if (linux.errno(rc) != .SUCCESS) return self.gpa.free(path);
+        const fd: linux.fd_t = @intCast(rc);
+        switch (linux.errno(linux.flock(fd, std.posix.LOCK.EX | std.posix.LOCK.NB))) {
+            .SUCCESS => {
+                // The PID is only for the message in the other iro.
+                var buf: [16]u8 = undefined;
+                const pid = std.fmt.bufPrint(&buf, "{d}\n", .{linux.getpid()}) catch unreachable;
+                _ = linux.ftruncate(fd, 0);
+                _ = linux.pwrite(fd, pid.ptr, pid.len, 0);
+                d.lock_fd = fd;
+                d.lock_path = path;
+            },
+            .AGAIN => {
+                var buf: [16]u8 = undefined;
+                const n = linux.pread(fd, &buf, buf.len, 0);
+                const got = if (linux.errno(n) == .SUCCESS) buf[0..n] else buf[0..0];
+                d.foreign = std.fmt.parseInt(u32, std.mem.trim(u8, got, " \n"), 10) catch 0;
+                d.read_only = true;
+                _ = linux.close(fd);
+                self.gpa.free(path);
+            },
+            // A file system without locks: carry on as before.
+            else => {
+                _ = linux.close(fd);
+                self.gpa.free(path);
+            },
+        }
+    }
+
+    fn sayForeign(self: *App) void {
+        const pid = self.d.foreign orelse return;
+        const name = self.d.name();
+        if (pid != 0) {
+            self.say(true, "Nur zum Lesen: {s} ist schon in iro PID {d} offen", "Read-only: {s} is already open in iro PID {d}", .{ name, pid });
+        } else {
+            self.say(true, "Nur zum Lesen: {s} ist schon in einem anderen iro offen", "Read-only: {s} is already open in another iro", .{name});
         }
     }
 
@@ -1028,7 +1106,8 @@ pub const App = struct {
 
     /// Does `d` hold a change its recovery file doesn't know yet?
     fn swapDue(d: *const Doc) bool {
-        if (d.swap_path == null) return false;
+        // The backup of a file another iro has open belongs to that one.
+        if (d.swap_path == null or d.foreign != null) return false;
         // As long as an old backup has not been offered or the question about
         // it has not been answered, it stays untouched.
         if (!d.recover_checked or d.recover_text != null) return false;
@@ -1054,7 +1133,7 @@ pub const App = struct {
 
     fn removeSwap(self: *App, d: *Doc) void {
         const swap = d.swap_path orelse return;
-        if (!d.recover_checked) return;
+        if (!d.recover_checked or d.foreign != null) return;
         Io.Dir.cwd().deleteFile(self.io, swap) catch {};
         d.swapped_rev = d.ed.revision();
     }
@@ -1064,6 +1143,9 @@ pub const App = struct {
         const swap = self.d.swap_path orelse return;
         // Unnamed files are recovered by `recoverScratch` at start.
         const own_path = self.d.path orelse return;
+        // A backup of a file another iro has open is that one's live work, not
+        // something left over from a crash.
+        if (self.d.foreign != null) return;
         const cwd = Io.Dir.cwd();
         const raw = cwd.readFileAlloc(self.io, swap, self.gpa, .limited(fileio.max_file_size + 8192)) catch return;
         defer self.gpa.free(raw);
@@ -1141,6 +1223,7 @@ pub const App = struct {
             d.path = old_path;
             d.meta.disk = old_disk;
             gpa.free(new_path);
+            self.lockDoc(d);
             return;
         }
         // The backup under the old name is obsolete. If it stayed, iro would wrongly offer
@@ -1191,6 +1274,7 @@ pub const App = struct {
             self.d.recover_checked = true;
             self.checkRecovery();
         }
+        self.sayForeign();
         self.updateTitle();
     }
 

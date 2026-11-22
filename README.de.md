@@ -82,6 +82,8 @@ jederzeit, und die Tasten bleiben in beiden Gängen gleich.
   geschlossenen Terminal wieder angeboten.
 - **Auf der Platte geändert?** iro sagt Bescheid, bevor es fremde Änderungen
   überschreibt.
+- **Doppelt offen?** Das zweite iro liest nur mit, keins überschreibt das andere.
+  Kein Fehlalarm nach einem Absturz.
 - „Speichern unter“ ersetzt nie stillschweigend eine vorhandene Datei.
 
 ### 🔒 Sicher gebaut
