@@ -74,7 +74,8 @@ keys never change between gears.
 ### 🛟 Paranoid about your data
 
 - **Atomic saves:** write to a temporary file, sync, then rename. A crash mid-save
-  leaves the old file intact. Permissions and symlinks survive.
+  leaves the old file intact. Permissions, owner and group, ACLs, hard links and
+  symlinks survive.
 - **Crash recovery:** unsaved work, even in tabs without a file name, is backed
   up every two seconds and offered back after a crash or a closed terminal.
 - **Changed on disk?** iro tells you before it overwrites someone else's edit.

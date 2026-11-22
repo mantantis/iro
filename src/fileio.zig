@@ -12,9 +12,12 @@
 //! 2. Saving never destroys the original. The new content is first written
 //! completely to a temporary file and forced to disk. Only then is it moved
 //! over the original. If power fails halfway, either the old or the new version
-//! is there, never half of one.
+//! is there, never half of one. Owner, group, extended attributes (ACLs
+//! included) and hard links survive too: if a new file cannot carry them, iro
+//! writes into the original instead of replacing it.
 
 const std = @import("std");
+const linux = std.os.linux;
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
 const Buffer = @import("buffer.zig").Buffer;
@@ -163,6 +166,11 @@ pub fn writeAtomicMode(io: Io, dir: Io.Dir, path: []const u8, bytes: []const u8,
     const dir_path = std.fs.path.dirname(target) orelse ".";
     const base = std.fs.path.basename(target);
     const old_stat: ?Io.File.Stat = dir.statFile(io, target, .{}) catch null;
+    const target_z = std.posix.toPosixPath(target) catch return writeInPlace(io, dir, target, bytes, fresh);
+    const old_owner: ?Owner = if (old_stat != null) ownerOf(dir.handle, &target_z, 0) else null;
+    // A second name for the same file (hard link) would keep the old content
+    // if the file were replaced.
+    if (old_owner) |o| if (o.nlink > 1) return writeInPlace(io, dir, target, bytes, fresh);
 
     // The temporary file gets its mode at creation, not after writing.
     // Otherwise the content of a protected file would briefly be readable by
@@ -195,9 +203,21 @@ pub fn writeAtomicMode(io: Io, dir: Io.Dir, path: []const u8, bytes: []const u8,
     }
 
     try file.writeStreamingAll(io, bytes);
+    // Owner and group first: changing them clears setuid/setgid, so the mode
+    // comes after.
+    const owner_kept = if (old_owner) |o| keepOwner(file.handle, o) else true;
     // The new file gets the same mode as the old one. New files get what the
     // shell would give them (default minus umask).
-    file.setPermissions(io, wanted orelse defaultFilePermissions()) catch {};
+    if (owner_kept) file.setPermissions(io, wanted orelse defaultFilePermissions()) catch {};
+    if (!owner_kept or (old_stat != null and !copyXattrs(&target_z, file.handle))) {
+        // The new file cannot look like the old one (someone else's file, a
+        // group we are not in, an attribute only root may set). Replacing it
+        // would quietly change who may read it, so write into it instead.
+        file.close(io);
+        file_open = false;
+        tdir.deleteFile(io, tmp_name) catch {};
+        return writeInPlace(io, dir, target, bytes, fresh);
+    }
     try file.sync(io);
     file.close(io);
     file_open = false;
@@ -210,12 +230,55 @@ pub fn writeAtomicMode(io: Io, dir: Io.Dir, path: []const u8, bytes: []const u8,
 
 /// The mode a newly created file usually gets.
 fn defaultFilePermissions() Io.File.Permissions {
-    const linux = std.os.linux;
     if (@import("builtin").os.tag != .linux) return .default_file;
     // The umask can only be read by setting it and restoring it.
     const mask = linux.syscall1(.umask, 0o077);
     _ = linux.syscall1(.umask, mask);
     return .fromMode(@intCast(0o666 & ~mask));
+}
+
+/// Everything about a file that replacing it by rename would silently change.
+const Owner = struct { uid: linux.uid_t, gid: linux.gid_t, nlink: u32 };
+
+/// `path` relative to `fd`; an empty path with `AT_EMPTY_PATH` means `fd` itself.
+fn ownerOf(fd: linux.fd_t, path: [*:0]const u8, flags: u32) ?Owner {
+    var sx: linux.Statx = undefined;
+    const rc = linux.statx(fd, path, flags, .{ .UID = true, .GID = true, .NLINK = true }, &sx);
+    if (linux.errno(rc) != .SUCCESS) return null;
+    return .{ .uid = sx.uid, .gid = sx.gid, .nlink = sx.nlink };
+}
+
+/// Gives the new file the owner and group of the old one. Without root only
+/// the group can change, and only to one we are in. Returns whether both match.
+fn keepOwner(fd: linux.fd_t, want: Owner) bool {
+    const have = ownerOf(fd, "", linux.AT.EMPTY_PATH) orelse return false;
+    if (have.uid == want.uid and have.gid == want.gid) return true;
+    return linux.errno(linux.fchown(fd, want.uid, want.gid)) == .SUCCESS;
+}
+
+/// Copies all extended attributes (POSIX ACLs live there too) from `src` to
+/// the new file. Returns false if one cannot be copied.
+fn copyXattrs(src: [*:0]const u8, dst: linux.fd_t) bool {
+    var names: [64 * 1024]u8 = undefined;
+    const len = linux.listxattr(src, &names, names.len);
+    switch (linux.errno(len)) {
+        .SUCCESS => {},
+        .OPNOTSUPP => return true, // the file system has none
+        else => return false,
+    }
+    // A list of NUL-terminated names.
+    var i: usize = 0;
+    while (i < len) {
+        const name: [*:0]const u8 = @ptrCast(names[i..].ptr);
+        const name_len = std.mem.len(name);
+        i += name_len + 1;
+        if (name_len == 0) continue;
+        var value: [64 * 1024]u8 = undefined;
+        const value_len = linux.getxattr(src, name, &value, value.len);
+        if (linux.errno(value_len) != .SUCCESS) return false;
+        if (linux.errno(linux.fsetxattr(dst, name, &value, value_len, 0)) != .SUCCESS) return false;
+    }
+    return true;
 }
 
 fn syncDir(dir: Io.Dir) void {
@@ -366,4 +429,63 @@ test "external change on disk is detected" {
     try testing.expect(!changedOnDisk(io, tmp.dir, "a.txt", loaded.meta));
     try writeAtomic(io, tmp.dir, "a.txt", "eins und mehr\n");
     try testing.expect(changedOnDisk(io, tmp.dir, "a.txt", loaded.meta));
+}
+
+test "hard links keep sharing the content" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const io = testing.io;
+
+    try writeAtomic(io, tmp.dir, "eins.conf", "alt\n");
+    try tmp.dir.hardLink("eins.conf", tmp.dir, "zwei.conf", io, .{});
+    try writeAtomic(io, tmp.dir, "eins.conf", "neu\n");
+
+    const raw = try tmp.dir.readFileAlloc(io, "zwei.conf", testing.allocator, .limited(1024));
+    defer testing.allocator.free(raw);
+    try testing.expectEqualStrings("neu\n", raw);
+    const st = try tmp.dir.statFile(io, "eins.conf", .{});
+    try testing.expectEqual(@as(@TypeOf(st.nlink), 2), st.nlink);
+}
+
+test "extended attributes survive saving" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const io = testing.io;
+
+    try writeAtomic(io, tmp.dir, "a.txt", "alt\n");
+    var buf: [Io.Dir.max_path_bytes]u8 = undefined;
+    const n = try tmp.dir.realPathFile(io, "a.txt", &buf);
+    const path = try std.posix.toPosixPath(buf[0..n]);
+    const rc = linux.setxattr(&path, "user.iro.test", "wert", 4, 0);
+    if (linux.errno(rc) != .SUCCESS) return error.SkipZigTest; // no xattrs here
+
+    try writeAtomic(io, tmp.dir, "a.txt", "neu\n");
+    var value: [16]u8 = undefined;
+    const len = linux.getxattr(&path, "user.iro.test", &value, value.len);
+    try testing.expectEqual(linux.E.SUCCESS, linux.errno(len));
+    try testing.expectEqualStrings("wert", value[0..len]);
+}
+
+test "group survives saving" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const io = testing.io;
+
+    // Needs a second group the user is in (wheel, video, ...).
+    var groups: [64]linux.gid_t = undefined;
+    const count = linux.getgroups(groups.len, &groups);
+    if (linux.errno(count) != .SUCCESS) return error.SkipZigTest;
+    const other = for (groups[0..count]) |g| {
+        if (g != linux.getegid()) break g;
+    } else return error.SkipZigTest;
+
+    try writeAtomic(io, tmp.dir, "geteilt.conf", "alt\n");
+    var buf: [Io.Dir.max_path_bytes]u8 = undefined;
+    const n = try tmp.dir.realPathFile(io, "geteilt.conf", &buf);
+    const path = try std.posix.toPosixPath(buf[0..n]);
+    try testing.expectEqual(linux.E.SUCCESS, linux.errno(linux.fchownat(linux.AT.FDCWD, &path, linux.geteuid(), other, 0)));
+
+    try writeAtomic(io, tmp.dir, "geteilt.conf", "neu\n");
+    const after = ownerOf(linux.AT.FDCWD, &path, 0).?;
+    try testing.expectEqual(other, after.gid);
 }

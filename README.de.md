@@ -76,7 +76,7 @@ jederzeit, und die Tasten bleiben in beiden Gängen gleich.
 
 - **Atomares Speichern:** erst in eine Zwischendatei schreiben, synchronisieren,
   dann umbenennen. Ein Absturz mitten im Speichern lässt die alte Datei heil.
-  Rechte und Symlinks bleiben erhalten.
+  Rechte, Besitzer und Gruppe, ACLs, Hardlinks und Symlinks bleiben erhalten.
 - **Wiederherstellung nach Absturz:** Ungespeichertes, auch in Tabs ohne
   Dateinamen, wird alle zwei Sekunden gesichert und nach einem Absturz oder einem
   geschlossenen Terminal wieder angeboten.
