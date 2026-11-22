@@ -205,7 +205,9 @@ tests/e2e.sh                   # end-to-end run in tmux (~4 minutes)
 Idea & design: **Mausmann**. Built with AI (Claude Code & Antigravity).
 Terminal rendering by [libvaxis](https://github.com/rockorager/libvaxis).
 
-Like iro? Tips go straight into coffee and AI tokens on [Ko-fi](https://ko-fi.com/mausmann).
+Like iro? Tips go straight into coffee and AI tokens:
+
+<a href="https://ko-fi.com/mausmann"><img src="assets/kofi.gif" alt="Support me on Ko-fi" height="36"></a>
 
 ## License
 

@@ -217,7 +217,9 @@ tests/e2e.sh                   # Probelauf in tmux (~4 Minuten)
 Idee & Design: **Mausmann**. Gebaut mit KI (Claude Code & Antigravity).
 Terminal-Darstellung mit [libvaxis](https://github.com/rockorager/libvaxis).
 
-Gefällt dir iro? Trinkgeld fließt direkt in Kaffee und KI-Tokens auf [Ko-fi](https://ko-fi.com/mausmann).
+Gefällt dir iro? Trinkgeld fließt direkt in Kaffee und KI-Tokens:
+
+<a href="https://ko-fi.com/mausmann"><img src="assets/kofi.gif" alt="Support me on Ko-fi" height="36"></a>
 
 ## Lizenz
 
