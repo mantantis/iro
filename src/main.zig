@@ -277,7 +277,7 @@ pub const App = struct {
     /// The command palette, while it is open.
     palette: ?Palette = null,
     /// Where the palette list was last drawn, for mouse clicks.
-    pal_box: struct { x: u16 = 0, y: u16 = 0, w: u16 = 0, rows: u16 = 0 } = .{},
+    pal_box: struct { x0: u16 = 0, x1: u16 = 0, y0: u16 = 0, y1: u16 = 0, x: u16 = 0, y: u16 = 0, w: u16 = 0, rows: u16 = 0 } = .{},
     search_origin: Pos = .{},
     last_search: std.ArrayList(u8) = .empty,
     /// What is still pending after a successful save.
@@ -3693,20 +3693,26 @@ pub const App = struct {
             return;
         }
 
-        // Open palette: clicking an entry runs it, clicking outside closes it,
-        // the wheel moves the selection.
+        // Open palette: hover selects, clicking an entry runs it, clicking
+        // outside the card closes it, the wheel moves the selection.
         if (self.palette) |*p| {
             const box = self.pal_box;
+            const in_card = m.col >= box.x0 and m.col < box.x1 and m.row >= box.y0 and m.row < box.y1;
+            const in_list = m.col >= box.x and m.col < box.x + box.w and m.row >= box.y and m.row < box.y + box.rows;
             switch (m.button) {
                 .wheel_up => p.selected -|= 1,
                 .wheel_down => p.selected = @min(p.selected + 1, self.paletteItems().len -| 1),
-                else => if (m.type == .press) {
-                    const inside = m.col >= box.x and m.col < box.x + box.w and m.row >= box.y and m.row < box.y + box.rows;
-                    if (inside and m.button == .left) {
-                        p.selected = p.top + @as(usize, @intCast(m.row - @as(i32, box.y)));
-                        return self.paletteKey(.{ .codepoint = Key.enter });
+                else => {
+                    if (in_list) {
+                        const target = p.top + @as(usize, @intCast(m.row - @as(i32, box.y)));
+                        if (m.type == .motion) p.selected = target;
+                        if (m.type == .press and m.button == .left) {
+                            p.selected = target;
+                            return self.paletteKey(.{ .codepoint = Key.enter });
+                        }
+                    } else if (m.type == .press and !in_card) {
+                        self.closePalette();
                     }
-                    self.closePalette();
                 },
             }
             return;

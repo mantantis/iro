@@ -161,6 +161,10 @@ Unter Arch gibt es auch ein `PKGBUILD`: `makepkg -si`.
 Optional zur Laufzeit: `wl-clipboard` (Wayland-Zwischenablage), `glib2`
 (Papierkorb), `zoxide` (Alt+Z), `git` (Git-Spalte), eine Nerd-Schrift (Symbole).
 
+Für System-Configs mit Root-Rechten am besten `SUDO_EDITOR=iro sudoedit /etc/fstab`
+statt `sudo iro` nutzen — deine Config und dein Theme bleiben aktiv, und iro
+läuft nie als root.
+
 ## Tasten
 
 | Taste | Wirkung |

@@ -20,6 +20,9 @@ All notable changes to iro are documented here. The format follows
   file from disk instead.
 
 ### Changed
+- Command palette, file search, version history and word completion now share
+  the same card styling (tinted background, title bar, accent selection marker
+  and mouse hover) as the main menu and settings page.
 - Saving keeps owner, group, ACLs and hard links intact.
 - iro only wakes up when there is work to do.
 - External helpers (`git`, `wl-paste`, `gio`, `zoxide`) time out after two

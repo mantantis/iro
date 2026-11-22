@@ -154,7 +154,7 @@ start "$E/baum/a.txt' '$E/baum/b.txt"
 keys C-p
 ok "Palette appears"              'screen | grep -q "Befehl suchen" && screen | grep -q "Datei speichern .*Strg+S"'
 lit 'gz'
-ok "Fuzzy search finds"         'screen | sed -n 4p | grep -q "Gehe zu Zeile"'
+ok "Fuzzy search finds"         'screen | sed -n 5p | grep -q "Gehe zu Zeile"'
 keys Enter
 ok "Enter runs the command"     'screen | tail -1 | grep -q "Gehe zu Zeile:" && ! screen | grep -q "Befehl suchen"'
 keys Escape; sleep 0.3
@@ -173,7 +173,7 @@ start "$E/baum/a.txt"
 keys C-o
 ok "Search box lists the files"   'screen | grep -q "Datei suchen in .*baum" && screen | grep -q "unter/c.txt"'
 lit 'ctx'
-ok "Fuzzy search across paths"     'screen | sed -n 4p | grep -q "unter/c.txt" && screen | grep -q "1 von 3"'
+ok "Fuzzy search across paths"     'screen | sed -n 5p | grep -q "unter/c.txt" && screen | grep -q "1 von 3"'
 keys Enter; sleep 0.3
 ok "Enter opens the match"       'screen | sed -n 2p | grep -q "1 tief"'
 keys C-o; keys Tab
@@ -577,14 +577,14 @@ ok "Junk folder stays out"     '! screen | grep -q "node_modules"'
 keys C-o; sleep 0.5
 ok "Ctrl+O: whole home"            'screen | grep -q "deinem ganzen Home" && screen | grep -q "hyprland.lua"'
 lit 'hyprlnad'; sleep 0.3
-ok "Typo forgiven (≈)"       'screen | grep -q "≈" && screen | sed -n 4p | grep -q ".config/hypr/hyprland.lua"'
+ok "Typo forgiven (≈)"       'screen | grep -q "≈" && screen | sed -n 5p | grep -q ".config/hypr/hyprland.lua"'
 keys Enter; sleep 0.3
 ok "Match opened"               'screen | tail -1 | grep -q "hyprland.lua"'
 ok "Recent list remembered"          'grep -q "/.config/hypr/hyprland.lua" "$XDG_STATE_HOME/iro/zuletzt"'
 keys C-o; sleep 0.3
-ok "Recently opened comes first"  'screen | sed -n 4p | grep -q "hypr/hyprland.lua"'
+ok "Recently opened comes first"  'screen | sed -n 5p | grep -q "hypr/hyprland.lua"'
 lit 'rechnung'; sleep 0.3
-ok "Search in Dokumente"             'screen | sed -n 4p | grep -q "Dokumente/Rechnungen/rechnung_2024.txt"'
+ok "Search in Dokumente"             'screen | sed -n 5p | grep -q "Dokumente/Rechnungen/rechnung_2024.txt"'
 keys Escape; keys C-q; sleep 0.3
 EXTRA_ENV=""
 

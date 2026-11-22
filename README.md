@@ -150,6 +150,9 @@ On Arch there is also a `PKGBUILD`: `makepkg -si`.
 Optional at runtime: `wl-clipboard` (Wayland clipboard), `glib2` (trash),
 `zoxide` (Alt+Z), `git` (git gutter), a Nerd Font (icons).
 
+For root-owned system configs, use `SUDO_EDITOR=iro sudoedit /etc/fstab` instead
+of `sudo iro` — your config and theme stay intact and iro never runs as root.
+
 ## Keys
 
 | Key | Action |

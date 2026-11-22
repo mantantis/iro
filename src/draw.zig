@@ -554,7 +554,7 @@ fn drawCompletion(self: *App, tw: vaxis.Window, arena: Allocator, cur: CursorXY)
 
     var max_w: u16 = 12;
     for (items) |it| max_w = @max(max_w, tw.gwidth(it.word));
-    const w: u16 = @min(max_w + 5, tw.width);
+    const w: u16 = @min(max_w + 6, tw.width);
     const max_rows: u16 = @min(@as(u16, @intCast(items.len)), tw.height -| 2);
     if (max_rows == 0 or w < 8) return;
     const h: u16 = max_rows + 2;
@@ -562,26 +562,33 @@ fn drawCompletion(self: *App, tw: vaxis.Window, arena: Allocator, cur: CursorXY)
     const pref_x: u16 = cur.x -| @as(u16, @intCast(@min(self.comp_prefix_len, cur.x)));
     const x: u16 = @min(pref_x, tw.width - w);
     const accent = self.accentColor();
+    const pink = self.pinkColor();
+    const bg: vaxis.Color = cardBg(self) orelse .default;
+    const sel_bg = cardSelBg(self);
 
     const box = tw.child(.{ .x_off = x, .y_off = y, .width = w, .height = h, .border = .{
         .where = .all,
-        .style = .{ .fg = accent },
+        .style = .{ .fg = accent, .bg = bg },
     } });
-    box.clear();
+    box.fill(.{ .style = .{ .bg = bg } });
 
     var r: u16 = 0;
     while (r < max_rows) : (r += 1) {
         const it = items[r];
         const row_win = box.child(.{ .y_off = r, .height = 1 });
         const sel_row = r == self.comp_sel;
-        const st: vaxis.Style = if (sel_row) .{ .fg = accent, .reverse = true, .bold = true } else .{};
-        if (sel_row) row_win.fill(.{ .style = st });
-        const line = std.fmt.allocPrint(arena, " {s}", .{it.word}) catch it.word;
-        _ = row_win.printSegment(.{ .text = line, .style = st }, .{ .wrap = .none });
+        const row_bg: vaxis.Color = if (sel_row) (sel_bg orelse bg) else bg;
+        const reverse = sel_row and sel_bg == null;
+        const st: vaxis.Style = .{ .bg = row_bg, .bold = sel_row, .reverse = reverse };
+        if (sel_row) {
+            row_win.fill(.{ .style = st });
+            row_win.writeCell(0, 0, .{ .char = .{ .grapheme = "▌", .width = 1 }, .style = .{ .fg = accent, .bg = row_bg } });
+        }
+        _ = row_win.printSegment(.{ .text = it.word, .style = st }, .{ .col_offset = 2, .wrap = .none });
         if (it.is_keyword and w >= 12) {
             const tag = "kw";
             const tx: u16 = row_win.width -| 3;
-            _ = row_win.printSegment(.{ .text = tag, .style = if (sel_row) st else .{ .dim = true } }, .{ .col_offset = tx, .wrap = .none });
+            _ = row_win.printSegment(.{ .text = tag, .style = .{ .fg = pink, .bg = row_bg, .dim = !sel_row, .reverse = reverse } }, .{ .col_offset = tx, .wrap = .none });
         }
     }
 }
@@ -703,29 +710,46 @@ fn drawMinimap(
     }
 }
 
-/// The command palette: a box at the top centre, input on the first row,
+/// The command palette: a card at the top centre, input on the first row,
 /// matches below with their key at the right edge.
 fn drawPalette(self: *App, win: vaxis.Window, arena: Allocator) void {
     const p = &self.palette.?;
     const items = self.paletteItems();
     // Paths need more room than command names.
     const w: u16 = @min(@as(u16, if (p.mode == .commands) 66 else 96), win.width);
-    const max_rows: u16 = @min(12, win.height -| 5);
+    const sep: u16 = if (win.height >= 7) 1 else 0;
+    const max_rows: u16 = @min(12, win.height -| (5 + sep));
     const rows: u16 = @intCast(@min(items.len, max_rows));
-    // Top and bottom border, the input line, at least one row below.
-    const h: u16 = @min(@max(rows, 1) + 3, win.height);
+    // Top and bottom border, the input line, optional divider, at least one row below.
+    const h: u16 = @min(@max(rows, 1) + 3 + sep, win.height);
     const x: u16 = (win.width - w) / 2;
     const y: u16 = if (win.height > h + 1) 1 else 0;
     const accent = self.accentColor();
     const pink = self.pinkColor();
+    const bg: vaxis.Color = cardBg(self) orelse .default;
+    const sel_bg = cardSelBg(self);
     const box = win.child(.{ .x_off = x, .y_off = y, .width = w, .height = h, .border = .{
         .where = .all,
-        .style = .{ .fg = accent },
+        .style = .{ .fg = accent, .bg = bg },
     } });
-    box.clear();
+    box.fill(.{ .style = .{ .bg = bg } });
+
+    const title: []const u8 = switch (p.mode) {
+        .commands => ui(self, "Befehlspalette", "Command Palette"),
+        .files => ui(self, "Dateisuche", "Find File"),
+        .dirs => ui(self, "Ordner (zoxide)", "Folders (zoxide)"),
+        .versions => ui(self, "Frühere Versionen", "Earlier Versions"),
+    };
+    const tw = win.gwidth(title) + 2;
+    if (tw + 4 <= w) {
+        const tx = x + (w - tw) / 2;
+        _ = win.printSegment(.{ .text = " ", .style = .{ .bg = bg } }, .{ .row_offset = y, .col_offset = tx, .wrap = .none });
+        _ = win.printSegment(.{ .text = title, .style = .{ .fg = accent, .bg = bg, .bold = true } }, .{ .row_offset = y, .col_offset = tx + 1, .wrap = .none });
+        _ = win.printSegment(.{ .text = " ", .style = .{ .bg = bg } }, .{ .row_offset = y, .col_offset = tx + tw - 1, .wrap = .none });
+    }
 
     // Input line
-    const lead = box.printSegment(.{ .text = " › ", .style = .{ .fg = accent, .bold = true } }, .{ .wrap = .none });
+    const lead = box.printSegment(.{ .text = " › ", .style = .{ .fg = accent, .bg = bg, .bold = true } }, .{ .wrap = .none });
     if (p.input.items.len == 0) {
         const ask = switch (p.mode) {
             .commands => ui(self, "Befehl suchen …", "Search commands …"),
@@ -733,10 +757,10 @@ fn drawPalette(self: *App, win: vaxis.Window, arena: Allocator) void {
             .dirs => ui(self, "Ordner suchen (zoxide) …", "Search folders (zoxide) …"),
             .versions => fmtL(self, arena, "Frühere Versionen von {s} …", "Earlier versions of {s} …", .{self.d.name()}),
         };
-        _ = box.printSegment(.{ .text = ask, .style = .{ .dim = true } }, .{ .col_offset = lead.col, .wrap = .none });
+        _ = box.printSegment(.{ .text = ask, .style = .{ .bg = bg, .dim = true } }, .{ .col_offset = lead.col, .wrap = .none });
         box.showCursor(lead.col, 0);
     } else {
-        const r = box.printSegment(.{ .text = p.input.items }, .{ .col_offset = lead.col, .wrap = .none });
+        const r = box.printSegment(.{ .text = p.input.items, .style = .{ .bg = bg } }, .{ .col_offset = lead.col, .wrap = .none });
         box.showCursor(@min(r.col, box.width -| 1), 0);
     }
     box.setCursorShape(.beam);
@@ -755,19 +779,35 @@ fn drawPalette(self: *App, win: vaxis.Window, arena: Allocator) void {
         });
         const cw = win.gwidth(count);
         if (cw + 26 < box.width) {
-            _ = box.printSegment(.{ .text = count, .style = .{ .dim = !p.typo, .fg = if (p.typo) self.warnColor() else .default } }, .{ .col_offset = box.width - cw, .wrap = .none });
+            _ = box.printSegment(.{ .text = count, .style = .{ .bg = bg, .dim = !p.typo, .fg = if (p.typo) self.warnColor() else .default } }, .{ .col_offset = box.width - cw, .wrap = .none });
         }
     } else if (p.mode != .commands) {
         const count = fmtL(self, arena, "{d} von {d}{s} ", "{d} of {d}{s} ", .{ items.len, p.all.len, if (p.truncated) "+" else "" });
         const cw = win.gwidth(count);
         if (cw + 30 < box.width) {
-            _ = box.printSegment(.{ .text = count, .style = .{ .dim = true } }, .{ .col_offset = box.width - cw, .wrap = .none });
+            _ = box.printSegment(.{ .text = count, .style = .{ .bg = bg, .dim = true } }, .{ .col_offset = box.width - cw, .wrap = .none });
         }
     }
 
-    self.pal_box = .{ .x = x + 1, .y = y + 2, .w = box.width, .rows = rows };
+    if (sep == 1 and box.height > 1) {
+        var c: u16 = 1;
+        while (c + 1 < box.width) : (c += 1) {
+            box.writeCell(c, 1, .{ .char = .{ .grapheme = "─", .width = 1 }, .style = .{ .fg = accent, .bg = bg, .dim = true } });
+        }
+    }
+
+    self.pal_box = .{
+        .x0 = x,
+        .x1 = x + w,
+        .y0 = y,
+        .y1 = y + h,
+        .x = x + 1,
+        .y = y + 2 + sep,
+        .w = box.width,
+        .rows = rows,
+    };
     if (items.len == 0) {
-        _ = box.printSegment(.{ .text = ui(self, "   Nichts gefunden", "   Nothing found"), .style = .{ .dim = true } }, .{ .row_offset = 1, .wrap = .none });
+        _ = box.printSegment(.{ .text = ui(self, "   Nichts gefunden", "   Nothing found"), .style = .{ .bg = bg, .dim = true } }, .{ .row_offset = 1 + sep, .wrap = .none });
         return;
     }
     p.selected = @min(p.selected, items.len - 1);
@@ -779,16 +819,21 @@ fn drawPalette(self: *App, win: vaxis.Window, arena: Allocator) void {
     while (r < rows) : (r += 1) {
         const item = items[p.top + r];
         const selected = p.top + r == p.selected;
-        const row = r + 1;
+        const row = r + 1 + sep;
         const line = box.child(.{ .y_off = row, .height = 1 });
-        if (selected) line.fill(.{ .style = .{ .fg = accent, .reverse = true } });
-        const name_style: vaxis.Style = if (selected) .{ .fg = accent, .reverse = true, .bold = true } else .{};
-        const name = std.fmt.allocPrint(arena, "   {s}", .{text.cleanName(arena, item.name)}) catch continue;
-        _ = line.printSegment(.{ .text = name, .style = name_style }, .{ .wrap = .none });
+        const row_bg: vaxis.Color = if (selected) (sel_bg orelse bg) else bg;
+        const reverse = selected and sel_bg == null;
+        if (selected) {
+            line.fill(.{ .style = .{ .bg = row_bg, .reverse = reverse } });
+            line.writeCell(0, 0, .{ .char = .{ .grapheme = "▌", .width = 1 }, .style = .{ .fg = accent, .bg = row_bg } });
+        }
+        const name_style: vaxis.Style = .{ .bg = row_bg, .bold = selected, .reverse = reverse };
+        const clean = text.cleanName(arena, item.name);
+        _ = line.printSegment(.{ .text = clean, .style = name_style }, .{ .col_offset = 3, .wrap = .none });
         // The key goes on the right if the name leaves room for it.
         const kw = win.gwidth(item.key);
-        if (kw > 0 and win.gwidth(name) + kw + 3 <= line.width) {
-            const key_style: vaxis.Style = if (selected) .{ .fg = accent, .reverse = true } else .{ .fg = pink };
+        if (kw > 0 and 3 + win.gwidth(clean) + kw + 3 <= line.width) {
+            const key_style: vaxis.Style = .{ .fg = pink, .bg = row_bg, .dim = !selected, .reverse = reverse };
             _ = line.printSegment(.{ .text = item.key, .style = key_style }, .{ .col_offset = line.width - kw - 2, .wrap = .none });
         }
     }
