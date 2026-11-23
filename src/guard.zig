@@ -53,7 +53,8 @@ pub fn detect(path: []const u8, content: []const u8) ?Checker {
 
     if (std.mem.eql(u8, base, "fstab") or std.mem.endsWith(u8, base, ".fstab")) return .fstab;
 
-    if (std.mem.eql(u8, base, "sudoers")) return .sudoers;
+    // `visudo` lets the editor work on `sudoers.tmp`.
+    if (std.mem.eql(u8, base, "sudoers") or std.mem.eql(u8, base, "sudoers.tmp")) return .sudoers;
     if (std.mem.indexOf(u8, path, "/sudoers.d/") != null) {
         if (!std.mem.startsWith(u8, base, ".") and !std.mem.endsWith(u8, base, "~") and
             !std.ascii.eqlIgnoreCase(base, "README"))
@@ -83,6 +84,75 @@ pub fn detect(path: []const u8, content: []const u8) ?Checker {
     if (std.mem.endsWith(u8, base, ".bash")) return .bash;
     if (std.mem.endsWith(u8, base, ".sh")) return .sh;
     return null;
+}
+
+/// With `sudoedit`, the editor only sees a copy in /var/tmp whose name hides
+/// the original (`fstab.hrXpcOpD`, `pacman2n5oOGbU.conf`, and the folder is
+/// lost entirely). If iro runs under `sudoedit` or `sudo -e`, this returns the
+/// original path from its command line, written into `out`, so the right
+/// checker applies. `null`: not a sudoedit copy.
+pub fn sudoeditOriginal(io: Io, path: []const u8, out: []u8) ?[]const u8 {
+    if (@import("builtin").os.tag != .linux) return null;
+    if (!std.mem.startsWith(u8, path, "/var/tmp/")) return null;
+    const copy = std.fs.path.basename(path);
+    // The editor may sit below a monitor process; look a few levels up.
+    var pid: i32 = std.os.linux.getppid();
+    for (0..4) |_| {
+        if (pid <= 1) return null;
+        var name_buf: [64]u8 = undefined;
+        var buf: [8192]u8 = undefined;
+        const cmd_path = std.fmt.bufPrint(&name_buf, "/proc/{d}/cmdline", .{pid}) catch return null;
+        const cmdline = Io.Dir.cwd().readFile(io, cmd_path, &buf) catch return null;
+        if (originalFromCmdline(cmdline, copy)) |orig| {
+            // Only the name and folder matter for detection, so a relative
+            // argument is enough once it starts with a slash.
+            const sep: []const u8 = if (std.mem.startsWith(u8, orig, "/")) "" else "/";
+            return std.fmt.bufPrint(out, "{s}{s}", .{ sep, orig }) catch null;
+        }
+        const stat_path = std.fmt.bufPrint(&name_buf, "/proc/{d}/stat", .{pid}) catch return null;
+        const stat = Io.Dir.cwd().readFile(io, stat_path, &buf) catch return null;
+        pid = parentFromStat(stat) orelse return null;
+    }
+    return null;
+}
+
+/// The argument of a `sudoedit` / `sudo -e` command line (NUL-separated)
+/// whose temporary copy is called `copy`.
+fn originalFromCmdline(cmdline: []const u8, copy: []const u8) ?[]const u8 {
+    var args = std.mem.tokenizeScalar(u8, cmdline, 0);
+    const prog = std.fs.path.basename(args.next() orelse return null);
+    var editing = std.mem.eql(u8, prog, "sudoedit");
+    if (!editing and !std.mem.eql(u8, prog, "sudo")) return null;
+    var found: ?[]const u8 = null;
+    while (args.next()) |arg| {
+        if (std.mem.eql(u8, arg, "-e") or std.mem.eql(u8, arg, "--edit")) editing = true;
+        if (arg[0] == '-') continue;
+        if (found == null and isSudoeditCopy(std.fs.path.basename(arg), copy)) found = arg;
+    }
+    return if (editing) found else null;
+}
+
+/// Does sudoedit name the copy of a file called `orig` like `copy`? It adds
+/// eight random characters: before the last dot if there is one
+/// (`pacman.conf` → `pacmanXXXXXXXX.conf`), otherwise after a dot
+/// (`fstab` → `fstab.XXXXXXXX`).
+fn isSudoeditCopy(orig: []const u8, copy: []const u8) bool {
+    if (orig.len == 0) return false;
+    if (std.mem.lastIndexOfScalar(u8, orig, '.')) |dot| {
+        const stem = orig[0..dot];
+        const ext = orig[dot..];
+        return copy.len == orig.len + 8 and std.mem.startsWith(u8, copy, stem) and std.mem.endsWith(u8, copy, ext);
+    }
+    return copy.len == orig.len + 9 and std.mem.startsWith(u8, copy, orig) and copy[orig.len] == '.';
+}
+
+/// Parent PID from the content of /proc/<pid>/stat ("pid (comm) state ppid …").
+fn parentFromStat(stat: []const u8) ?i32 {
+    // The program name may contain spaces and parentheses; it ends at the last ')'.
+    const close = std.mem.lastIndexOfScalar(u8, stat, ')') orelse return null;
+    var fields = std.mem.tokenizeScalar(u8, stat[close + 1 ..], ' ');
+    _ = fields.next() orelse return null; // state
+    return std.fmt.parseInt(i32, fields.next() orelse return null, 10) catch null;
 }
 
 /// Does `path` look like a Hyprland config file? Checked after saving via
@@ -338,6 +408,31 @@ test "detect matches known configs and respects shebangs" {
     try testing.expectEqual(@as(?Checker, null), detect("/home/u/notes.txt", "hello\n"));
     try testing.expect(isHyprConfig("/home/u/.config/hypr/hyprland.conf"));
     try testing.expect(!isHyprConfig("/home/u/.config/kitty/kitty.conf"));
+}
+
+test "sudoedit copies are traced back to the original" {
+    // Names as sudo 1.9 really creates them.
+    try testing.expect(isSudoeditCopy("fstab", "fstab.hrXpcOpD"));
+    try testing.expect(isSudoeditCopy("sshd_config", "sshd_config.zsJtpBm9"));
+    try testing.expect(isSudoeditCopy("pacman.conf", "pacman2n5oOGbU.conf"));
+    try testing.expect(isSudoeditCopy(".bashrc", "Ab3dEf7h.bashrc"));
+    try testing.expect(!isSudoeditCopy("fstab", "fstab.bak"));
+    try testing.expect(!isSudoeditCopy("hosts", "fstab.hrXpcOpD"));
+
+    try testing.expectEqualStrings("/etc/fstab", originalFromCmdline("sudoedit\x00/etc/fstab\x00", "fstab.hrXpcOpD").?);
+    try testing.expectEqualStrings(
+        "/etc/sudoers.d/10-wheel",
+        originalFromCmdline("sudo\x00-u\x00root\x00-e\x00/etc/hosts\x00/etc/sudoers.d/10-wheel\x00", "10-wheel.Qx81LmZp").?,
+    );
+    // Plain sudo running something else is not an edit.
+    try testing.expect(originalFromCmdline("sudo\x00cat\x00/etc/fstab\x00", "fstab.hrXpcOpD") == null);
+    try testing.expect(originalFromCmdline("bash\x00/etc/fstab\x00", "fstab.hrXpcOpD") == null);
+
+    try testing.expectEqual(@as(?i32, 4711), parentFromStat("1234 (iro (a) b) S 4711 1234 1234 0"));
+
+    // With the original path, the right checker applies.
+    try testing.expectEqual(@as(?Checker, .sudoers), detect("/etc/sudoers.d/10-wheel", ""));
+    try testing.expectEqual(@as(?Checker, .sudoers), detect("/etc/sudoers.tmp", ""));
 }
 
 test "Hyprland check covers Lua configs and skips the other Hypr tools" {

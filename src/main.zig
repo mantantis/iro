@@ -291,6 +291,9 @@ pub const App = struct {
     /// Config Guard warning while waiting for confirmation to save anyway.
     guard_tool: []const u8 = "",
     guard_err: ?[]u8 = null,
+    /// Whether the save that the Config Guard question interrupted had
+    /// already been allowed to overwrite a changed file.
+    guard_overwrite: bool = false,
     /// Find and replace: what is searched for, what it is replaced with and how
     /// many replacements so far.
     replace_needle: std.ArrayList(u8) = .empty,
@@ -1217,19 +1220,32 @@ pub const App = struct {
 
     // ───────────── Saving ─────────────
 
-    fn save(self: *App, force: bool) void {
+    const SaveOpts = struct {
+        /// The user agreed to overwrite what is on disk (changed elsewhere, or
+        /// an existing file chosen in "Save as").
+        overwrite: bool = false,
+        /// The user saw the Config Guard warning and saves anyway.
+        guard_ok: bool = false,
+    };
+
+    fn save(self: *App, opts: SaveOpts) void {
         self.save_ok = false;
         const path = self.d.path orelse return self.openPrompt(.save_as, "");
         const cwd = Io.Dir.cwd();
-        if (!force and fileio.changedOnDisk(self.io, cwd, path, self.d.meta)) {
+        if (!opts.overwrite and fileio.changedOnDisk(self.io, cwd, path, self.d.meta)) {
             return self.openPrompt(.confirm_overwrite, "");
         }
-        if (!force and self.cfg.config_guard) {
+        if (!opts.guard_ok and self.cfg.config_guard) {
             const draft = fileio.encode(self.gpa, &self.d.ed.buf, self.d.meta) catch null;
             defer if (draft) |b| self.gpa.free(b);
+            // Under sudoedit the file is a copy in /var/tmp; check it as what
+            // it really is.
+            var orig_buf: [Io.Dir.max_path_bytes]u8 = undefined;
+            const check_path = iro.guard.sudoeditOriginal(self.io, path, &orig_buf) orelse path;
             if (draft) |bytes| {
-                if (iro.guard.checkPreSave(self.gpa, self.io, path, bytes, self.lang) catch null) |prob| {
+                if (iro.guard.checkPreSave(self.gpa, self.io, check_path, bytes, self.lang) catch null) |prob| {
                     self.openPrompt(.confirm_guard, "");
+                    self.guard_overwrite = opts.overwrite;
                     self.guard_tool = prob.tool;
                     self.guard_err = prob.detail;
                     return;
@@ -1238,8 +1254,8 @@ pub const App = struct {
         }
         // The state on disk goes into the history before it is overwritten.
         // Saving an untouched tab changes nothing on disk, unless it overwrites
-        // someone else's edit (`force`), which is worth keeping too.
-        if (self.cfg.history and (self.d.ed.isModified() or force)) {
+        // someone else's edit, which is worth keeping too.
+        if (self.cfg.history and (self.d.ed.isModified() or opts.overwrite)) {
             var root_buf: [Io.Dir.max_path_bytes]u8 = undefined;
             if (self.statePath(&root_buf, "history")) |root| iro.history.keep(self.gpa, self.io, root, path) catch {};
         }
@@ -1292,8 +1308,11 @@ pub const App = struct {
         d.path = new_path;
         d.meta.disk = null;
         self.initSwapPath() catch {};
-        self.save(true);
-        if (!self.save_ok) {
+        self.save(.{ .overwrite = true });
+        // If the Config Guard asks first, the tab keeps its new name; the
+        // answer then saves under it (or not).
+        const guard_asks = if (self.prompt) |p| p.kind == .confirm_guard else false;
+        if (!self.save_ok and !guard_asks) {
             // Back to square one; the error message from `save` stays.
             if (d.swap_path) |p| gpa.free(p);
             d.swap_path = old_swap;
@@ -2642,7 +2661,7 @@ pub const App = struct {
         }
         switch (cmd) {
             .palette => self.openPalette(.commands),
-            .save => self.save(false),
+            .save => self.save(.{}),
             .save_as => self.openPrompt(.save_as, self.d.path orelse ""),
             .history => self.openPalette(.versions),
             .open => self.openPalette(.files),
@@ -3193,7 +3212,7 @@ pub const App = struct {
                 if (key.matches('s', .{}) or self.yes(key)) {
                     self.closePrompt();
                     self.after_save = if (quit) .quit else .close;
-                    self.save(false);
+                    self.save(.{});
                 } else if (self.discard(key) or key.matches('n', .{})) {
                     self.closePrompt();
                     if (quit and self.docs.items.len == 1) {
@@ -3221,7 +3240,8 @@ pub const App = struct {
             .confirm_overwrite => {
                 if (self.yes(key)) {
                     self.closePrompt();
-                    self.save(true);
+                    // Overwriting is agreed; the Config Guard still has its say.
+                    self.save(.{ .overwrite = true });
                 } else if (key.matches('l', .{})) {
                     self.closePrompt();
                     self.after_save = .stay;
@@ -3234,8 +3254,9 @@ pub const App = struct {
             },
             .confirm_guard => {
                 if (self.yes(key)) {
+                    const overwrite = self.guard_overwrite;
                     self.closePrompt();
-                    self.save(true);
+                    self.save(.{ .overwrite = overwrite, .guard_ok = true });
                 } else if (cp == Key.escape or key.matches('n', .{}) or key.matches('a', .{})) {
                     self.closePrompt();
                     self.after_save = .stay;
@@ -3335,7 +3356,7 @@ pub const App = struct {
                     if (same) {
                         self.gpa.free(resolved);
                         self.closePrompt();
-                        return self.save(true);
+                        return self.save(.{ .overwrite = true });
                     }
                     // If something is already there, it is never silently
                     // replaced.
