@@ -12,6 +12,8 @@ set -u
 # IRO=/path/to/iro tests/e2e.sh tests a different binary (e.g. a copy).
 IRO="${IRO:-$(cd "$(dirname "$0")/.." && pwd)/zig-out/bin/iro}"
 E="$(mktemp -d)"; export XDG_STATE_HOME="$E/state" XDG_CONFIG_HOME="$E/config"
+# Backups of secrets go to the runtime folder; keep them out of the real one.
+export XDG_RUNTIME_DIR="$E/run"; mkdir -m 700 "$XDG_RUNTIME_DIR"
 # For the trash test: a folder on the same disk as the home directory (/tmp has
 # no trash) with its own throwaway trash.
 mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}"
@@ -271,7 +273,8 @@ printf 'TOKEN=geheim\n' > "$BOESE"; chmod 600 "$BOESE"
 start "$BOESE"
 ok "Title contains no control characters" '[ "$(t display -p "#{pane_title}")" = "iro – bö?]2;GEKAPERT?se.txt" ]'
 lit 'X'; sleep 4.5
-ok "Backup is owner-only" '[ "$(stat -c %a "$XDG_STATE_HOME"/iro/swap/*.swap)" = "600" ] && [ "$(stat -c %a "$XDG_STATE_HOME/iro/swap")" = "700" ]'
+ok "Backup of a secret stays in RAM, owner-only" '[ "$(stat -c %a "$XDG_RUNTIME_DIR"/iro/swap/*.swap)" = "600" ] && [ "$(stat -c %a "$XDG_RUNTIME_DIR/iro/swap")" = "700" ]'
+ok "No copy of the secret on disk" '! grep -rqs geheim "$XDG_STATE_HOME/iro"'
 keys C-s; sleep 0.3
 ok "Protected file stays protected" '[ "$(stat -c %a "$BOESE")" = "600" ] && [ "$(cat "$BOESE")" = "XTOKEN=geheim" ]'
 keys C-q; sleep 0.3
