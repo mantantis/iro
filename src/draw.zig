@@ -32,7 +32,10 @@ fn ui(self: *const App, de: []const u8, en: []const u8) []const u8 {
 
 /// Like `ui`, with placeholders. The compiler checks both formats.
 fn fmtL(self: *const App, arena: Allocator, comptime de: []const u8, comptime en: []const u8, args: anytype) []const u8 {
-    return (if (self.lang == .en) std.fmt.allocPrint(arena, en, args) else std.fmt.allocPrint(arena, de, args)) catch "";
+    // The arguments are often names or text from outside (files, folders,
+    // checker output); nothing in them may hide or reverse characters.
+    const out = (if (self.lang == .en) std.fmt.allocPrint(arena, en, args) else std.fmt.allocPrint(arena, de, args)) catch return "";
+    return text.cleanName(arena, out);
 }
 const CursorXY = struct { x: u16, y: u16 };
 
@@ -424,7 +427,7 @@ pub fn draw(self: *App) void {
                         }
                     }
 
-                    if (hidden != .none or blank or clipped) {
+                    if ((hidden != .none and hidden != .joined) or blank or clipped) {
                         const in_indent = blank and c.start < indent_len and content_end > 0;
                         const trailing = blank and self.cfg.show_trailing and c.start >= content_end and !is_cur;
                         var k: usize = 0;
@@ -471,8 +474,17 @@ pub fn draw(self: *App) void {
                                 style.ul = accent;
                             }
                         }
+                        // An invisible joiner glued to this character: show the
+                        // character alone, marked like the other hidden ones.
+                        const shown = if (hidden == .joined) text.baseChar(bytes) else bytes;
+                        if (hidden == .joined) {
+                            style.fg = bad;
+                            style.bold = true;
+                            style.ul_style = .curly;
+                            style.ul = bad;
+                        }
                         tw.writeCell(@intCast(self.gutter_w + c.dcol - seg_left), y, .{
-                            .char = .{ .grapheme = bytes, .width = @intCast(c.width) },
+                            .char = .{ .grapheme = shown, .width = @intCast(c.width) },
                             .style = style,
                         });
                     }
@@ -584,7 +596,7 @@ fn drawCompletion(self: *App, tw: vaxis.Window, arena: Allocator, cur: CursorXY)
             row_win.fill(.{ .style = st });
             row_win.writeCell(0, 0, .{ .char = .{ .grapheme = "▌", .width = 1 }, .style = .{ .fg = accent, .bg = row_bg } });
         }
-        _ = row_win.printSegment(.{ .text = it.word, .style = st }, .{ .col_offset = 2, .wrap = .none });
+        _ = row_win.printSegment(.{ .text = text.cleanName(arena, it.word), .style = st }, .{ .col_offset = 2, .wrap = .none });
         if (it.is_keyword and w >= 12) {
             const tag = "kw";
             const tx: u16 = row_win.width -| 3;
@@ -648,7 +660,7 @@ fn drawInactivePane(self: *App, pane: vaxis.Window, arena: Allocator) void {
                 const hidden = text.hiddenKind(bytes);
                 const blank = bytes[0] == '\t' or (bytes.len == 1 and bytes[0] == ' ');
                 const clipped = c.dcol < seg_left or c.dcol + c.width > seg_left + tw_w;
-                if (hidden != .none or blank or clipped) continue;
+                if ((hidden != .none and hidden != .joined) or blank or clipped) continue;
                 var style: vaxis.Style = .{ .dim = true, .fg = self.textColor() };
                 if (line_kinds) |k| {
                     const ks = self.kindStyle(k[c.start]);
@@ -760,7 +772,7 @@ fn drawPalette(self: *App, win: vaxis.Window, arena: Allocator) void {
         _ = box.printSegment(.{ .text = ask, .style = .{ .bg = bg, .dim = true } }, .{ .col_offset = lead.col, .wrap = .none });
         box.showCursor(lead.col, 0);
     } else {
-        const r = box.printSegment(.{ .text = p.input.items, .style = .{ .bg = bg } }, .{ .col_offset = lead.col, .wrap = .none });
+        const r = box.printSegment(.{ .text = text.cleanName(arena, p.input.items), .style = .{ .bg = bg } }, .{ .col_offset = lead.col, .wrap = .none });
         box.showCursor(@min(r.col, box.width -| 1), 0);
     }
     box.setCursorShape(.beam);
@@ -1268,7 +1280,7 @@ fn drawTree(self: *App, win: vaxis.Window, arena: Allocator) void {
     // Header: the current folder. Clicking it goes up one level.
     const base = std.fs.path.basename(t.root);
     const head = std.fmt.allocPrint(arena, " ↑ {s}", .{if (base.len > 0) base else "/"}) catch "";
-    _ = panel.printSegment(.{ .text = head, .style = .{ .fg = accent, .bold = true } }, .{ .wrap = .none });
+    _ = panel.printSegment(.{ .text = text.cleanName(arena, head), .style = .{ .fg = accent, .bold = true } }, .{ .wrap = .none });
 
     const rows = self.text_h -| 1;
     const n = t.entries.items.len;

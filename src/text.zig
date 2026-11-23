@@ -65,6 +65,10 @@ pub const Hidden = enum {
     /// Invisible but effective: characters that reverse the reading direction
     /// ("Trojan Source") or have no width at all. Marked prominently.
     sneaky,
+    /// A visible character with an invisible joiner glued to it (zero-width
+    /// joiner or non-joiner, outside an emoji sequence). `is‌Admin` looks
+    /// like `isAdmin` but is a different name. Drawn as itself, but marked.
+    joined,
 };
 
 fn hiddenCodepoint(cp: u21) Hidden {
@@ -75,14 +79,59 @@ fn hiddenCodepoint(cp: u21) Hidden {
     };
 }
 
-/// Classifies a visible character. Only standalone characters count: the
-/// invisible joiner inside an emoji is fine.
+/// Classifies a visible character. The zero-width joiner and non-joiner
+/// attach to the character before them, so they are looked for inside the
+/// whole cluster; only the joiner between emoji is fine.
 pub fn hiddenKind(bytes: []const u8) Hidden {
-    if (bytes.len == 0 or bytes.len > 4) return .none;
+    if (bytes.len == 0) return .none;
     const n = std.unicode.utf8ByteSequenceLength(bytes[0]) catch return .none;
-    if (n != bytes.len) return .none;
-    const cp = std.unicode.utf8Decode(bytes) catch return .none;
-    return hiddenCodepoint(cp);
+    if (n > bytes.len) return .none;
+    if (n == bytes.len) {
+        const cp = std.unicode.utf8Decode(bytes) catch return .none;
+        return hiddenCodepoint(cp);
+    }
+    var view = std.unicode.Utf8View.init(bytes) catch return .none;
+    var it = view.iterator();
+    var prev: u21 = 0;
+    while (it.nextCodepoint()) |cp| {
+        if (cp == 0x200C or (cp == 0x200D and !isEmojiPart(prev))) return .joined;
+        prev = cp;
+    }
+    return .none;
+}
+
+/// The first character of a cluster, without what is attached to it.
+pub fn baseChar(bytes: []const u8) []const u8 {
+    const n = std.unicode.utf8ByteSequenceLength(bytes[0]) catch return bytes[0..1];
+    return bytes[0..@min(n, bytes.len)];
+}
+
+/// Can a zero-width joiner after `cp` be part of an emoji sequence
+/// (👨‍👩‍👧, ❤️‍🔥, 🏳️‍🌈)? Rough but sufficient: emoji blocks, symbols, the
+/// emoji variation selector and skin tones.
+fn isEmojiPart(cp: u21) bool {
+    return cp >= 0x1F000 or (cp >= 0x2190 and cp <= 0x2BFF) or cp == 0xFE0F or cp == 0x20E3;
+}
+
+/// Same rules as `cleanName`, but in place, for text that already sits in a
+/// buffer (status messages, output of other programs): every control and
+/// invisible character becomes "?". Returns the (possibly shorter) result.
+pub fn neutralize(buf: []u8) []u8 {
+    var r: usize = 0;
+    var w: usize = 0;
+    while (r < buf.len) {
+        const n = std.unicode.utf8ByteSequenceLength(buf[r]) catch 1;
+        const cp: ?u21 = if (r + n <= buf.len) (std.unicode.utf8Decode(buf[r .. r + n]) catch null) else null;
+        if (cp == null or cp.? == '\t' or hiddenCodepoint(cp.?) != .none) {
+            buf[w] = '?';
+            w += 1;
+        } else {
+            std.mem.copyForwards(u8, buf[w .. w + n], buf[r .. r + n]);
+            w += n;
+        }
+        r += @min(n, buf.len - r);
+    }
+    return buf[0..w];
 }
 
 /// Makes a name (file, folder) safe for the title and status line: control and
@@ -225,10 +274,41 @@ test "invisible and control characters are detected" {
     while (it.next()) |c| switch (hiddenKind(line[c.start..c.end()])) {
         .control => controls += 1,
         .sneaky => sneaky += 1,
-        .none => {},
+        .none, .joined => {},
     };
     try testing.expectEqual(@as(usize, 2), controls);
     try testing.expectEqual(@as(usize, 2), sneaky);
+}
+
+test "zero-width joiners glued to a letter are caught, emoji stay clean" {
+    // `is\u{200C}Admin` looks like `isAdmin`: the joiner hides inside "s".
+    const line = "is\u{200C}Admin = x\u{200D}y";
+    var it = iterate(line, 4);
+    var joined: usize = 0;
+    while (it.next()) |c| {
+        const bytes = line[c.start..c.end()];
+        if (hiddenKind(bytes) == .joined) {
+            joined += 1;
+            try testing.expectEqual(@as(usize, 1), baseChar(bytes).len);
+        }
+    }
+    try testing.expectEqual(@as(usize, 2), joined);
+    // Joiners that build emoji are fine.
+    try testing.expectEqual(Hidden.none, hiddenKind("👨‍👩‍👧"));
+    try testing.expectEqual(Hidden.none, hiddenKind("❤️‍🔥"));
+    try testing.expectEqual(Hidden.none, hiddenKind("🏳️‍🌈"));
+    try testing.expectEqual(Hidden.none, hiddenKind("👍🏽"));
+    // A combining accent is visible, not hidden.
+    try testing.expectEqual(Hidden.none, hiddenKind("e\u{0301}"));
+}
+
+test "status text is neutralized in place" {
+    var buf = "ok \u{202E}txt.exe\u{202C} \x1b[2J \u{200B}x\u{2066}y é".*;
+    const out = neutralize(&buf);
+    try testing.expectEqualStrings("ok ?txt.exe? ?[2J ?x?y é", out);
+    // Nothing to do: unchanged.
+    var plain = "Gespeichert: a.txt (3 Zeilen)".*;
+    try testing.expectEqualStrings("Gespeichert: a.txt (3 Zeilen)", neutralize(&plain));
 }
 
 test "names are sanitized for title and status line" {

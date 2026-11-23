@@ -14,6 +14,7 @@ const Allocator = std.mem.Allocator;
 const Io = std.Io;
 const fileio = @import("fileio.zig");
 const Lang = @import("lang.zig").Lang;
+const text = @import("text.zig");
 
 pub const Checker = enum {
     fstab,
@@ -384,6 +385,9 @@ fn cleanSummary(gpa: Allocator, raw: []const u8, tmp_dir: []const u8) Allocator.
     while (out.items.len > 0 and !std.unicode.utf8ValidateSlice(out.items)) {
         out.items.len -= 1;
     }
+    // The checker repeats lines of the file; they must not turn the prompt
+    // around (reading direction) or hide anything.
+    out.items.len = text.neutralize(out.items).len;
     return out.toOwnedSlice(gpa);
 }
 
@@ -433,6 +437,12 @@ test "sudoedit copies are traced back to the original" {
     // With the original path, the right checker applies.
     try testing.expectEqual(@as(?Checker, .sudoers), detect("/etc/sudoers.d/10-wheel", ""));
     try testing.expectEqual(@as(?Checker, .sudoers), detect("/etc/sudoers.tmp", ""));
+}
+
+test "checker output cannot reverse or hide text in the prompt" {
+    const s = try cleanSummary(testing.allocator, "line 3: \u{202E}lin.exe\u{202C}\tbad", "");
+    defer testing.allocator.free(s);
+    try testing.expectEqualStrings("line 3: ?lin.exe? bad", s);
 }
 
 test "Hyprland check covers Lua configs and skips the other Hypr tools" {

@@ -524,16 +524,9 @@ pub const App = struct {
         // Don't cut in the middle of a character.
         while (self.msg_len > 0 and !std.unicode.utf8ValidateSlice(self.msg_buf[0..self.msg_len])) self.msg_len -= 1;
         // Messages contain file names and output of other programs. Control
-        // characters in them have no place in the status line.
-        const m = self.msg_buf[0..self.msg_len];
-        for (m, 0..) |b, i| {
-            if (b < 0x20 or b == 0x7f) {
-                m[i] = '?';
-            } else if (b == 0xC2 and i + 1 < m.len and m[i + 1] >= 0x80 and m[i + 1] <= 0x9f) {
-                m[i] = '?';
-                m[i + 1] = '?';
-            }
-        }
+        // characters, reversed reading direction and invisible characters have
+        // no place in the status line.
+        self.msg_len = text.neutralize(self.msg_buf[0..self.msg_len]).len;
         self.msg_bad = is_bad;
     }
 
