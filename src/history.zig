@@ -26,14 +26,35 @@ pub fn wanted(path: []const u8, mode: u32) bool {
     if (mode & 0o044 == 0) return false;
     const secret_dirs = [_][]const u8{ "/.ssh/", "/.gnupg/", "/.password-store/", "/etc/wireguard/" };
     for (secret_dirs) |d| if (std.mem.indexOf(u8, path, d) != null) return false;
+    // Names are compared ignoring case: `server.KEY` is as secret as `server.key`.
     const base = std.fs.path.basename(path);
     const secret_names = [_][]const u8{ ".env", ".netrc", ".git-credentials", ".pgpass", "shadow", "gshadow" };
-    for (secret_names) |n| if (std.mem.eql(u8, base, n)) return false;
+    for (secret_names) |n| if (std.ascii.eqlIgnoreCase(base, n)) return false;
     const secret_prefixes = [_][]const u8{ ".env.", "id_" };
-    for (secret_prefixes) |p| if (std.mem.startsWith(u8, base, p)) return false;
+    for (secret_prefixes) |p| if (std.ascii.startsWithIgnoreCase(base, p)) return false;
     const secret_exts = [_][]const u8{ ".key", ".pem", ".p12", ".pfx", ".kdbx", ".age", ".gpg", ".asc" };
-    for (secret_exts) |e| if (std.mem.endsWith(u8, base, e)) return false;
+    for (secret_exts) |e| if (std.ascii.endsWithIgnoreCase(base, e)) return false;
     return true;
+}
+
+/// Is the file at `path` a secret that must not be copied anywhere on disk?
+/// Looks at its mode, its name, and also the real file behind a symlink
+/// (a link to `~/.ssh/id_ed25519` is still a key). A file that does not exist
+/// yet is judged by its name alone; any other doubt counts as secret.
+pub fn isSecret(io: Io, path: []const u8) bool {
+    const cwd = Io.Dir.cwd();
+    const mode: u32 = if (cwd.statFile(io, path, .{})) |st|
+        @intCast(st.permissions.toMode() & 0o777)
+    else |err| switch (err) {
+        error.FileNotFound => 0o644,
+        else => return true,
+    };
+    if (!wanted(path, mode)) return true;
+    var real_buf: [Io.Dir.max_path_bytes]u8 = undefined;
+    if (cwd.realPathFile(io, path, &real_buf)) |n| {
+        if (!wanted(real_buf[0..n], mode)) return true;
+    } else |_| {}
+    return false;
 }
 
 /// Folder holding the versions of `path`, below `root` (iro's history folder).
@@ -54,7 +75,7 @@ pub fn keep(gpa: Allocator, io: Io, root: []const u8, path: []const u8) !void {
     const cwd = Io.Dir.cwd();
     const st = cwd.statFile(io, path, .{}) catch return;
     if (st.kind != .file or st.size > max_size) return;
-    if (!wanted(path, @intCast(st.permissions.toMode() & 0o777))) return;
+    if (isSecret(io, path)) return;
     const old = cwd.readFileAlloc(io, path, gpa, .limited(max_size)) catch return;
     defer gpa.free(old);
     try store(gpa, io, root, path, old, st.mtime.nanoseconds);
@@ -65,8 +86,7 @@ pub fn keep(gpa: Allocator, io: Io, root: []const u8, path: []const u8) !void {
 /// Returns whether a copy exists afterwards.
 pub fn keepBytes(gpa: Allocator, io: Io, root: []const u8, path: []const u8, bytes: []const u8) !bool {
     if (bytes.len > max_size) return false;
-    const mode: u32 = if (Io.Dir.cwd().statFile(io, path, .{})) |st| @intCast(st.permissions.toMode() & 0o777) else |_| 0o644;
-    if (!wanted(path, mode)) return false;
+    if (isSecret(io, path)) return false;
     try store(gpa, io, root, path, bytes, Io.Timestamp.now(io, .real).nanoseconds);
     return true;
 }
@@ -153,6 +173,10 @@ test "secrets get no copies" {
     try testing.expect(!wanted("/home/m/projekt/.env.local", 0o644));
     try testing.expect(!wanted("/etc/ssl/private/server.key", 0o644));
     try testing.expect(!wanted("/etc/wireguard/wg0.conf", 0o644));
+    // Case does not hide a secret.
+    try testing.expect(!wanted("/home/m/projekt/.ENV", 0o644));
+    try testing.expect(!wanted("/etc/ssl/private/server.KEY", 0o644));
+    try testing.expect(!wanted("/home/m/cert.PEM", 0o644));
 }
 
 test "versions: kept before saving, deduplicated, capped" {
@@ -223,4 +247,42 @@ test "unsaved text can be kept too, secrets excepted" {
     defer gpa.free(got);
     try testing.expectEqualStrings("noch nicht gespeichert\n", got);
     try testing.expectEqual(@as(usize, 0), (try list(arena.allocator(), io, root, secret)).len);
+}
+
+test "a symlink to a secret is a secret; a new file is judged by name" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const io = testing.io;
+    const gpa = testing.allocator;
+
+    try tmp.dir.createDirPath(io, ".ssh");
+    // Readable by others on purpose: only the folder marks it as a key.
+    var key = try tmp.dir.createFile(io, ".ssh/id_test", .{ .permissions = .fromMode(0o644) });
+    key.close(io);
+    try tmp.dir.setFilePermissions(io, ".ssh/id_test", .fromMode(0o644), .{});
+    try tmp.dir.symLink(io, ".ssh/id_test", "harmless-name.txt", .{});
+    var plain = try tmp.dir.createFile(io, "notes.txt", .{ .permissions = .fromMode(0o644) });
+    plain.close(io);
+    try tmp.dir.setFilePermissions(io, "notes.txt", .fromMode(0o644), .{});
+
+    var buf: [Io.Dir.max_path_bytes]u8 = undefined;
+    const n = try tmp.dir.realPath(io, &buf);
+    const at = struct {
+        fn join(a: Allocator, dir: []const u8, name: []const u8) ![]u8 {
+            return std.fs.path.join(a, &.{ dir, name });
+        }
+    }.join;
+    const link = try at(gpa, buf[0..n], "harmless-name.txt");
+    defer gpa.free(link);
+    const notes = try at(gpa, buf[0..n], "notes.txt");
+    defer gpa.free(notes);
+    const new_env = try at(gpa, buf[0..n], "not-yet/.env");
+    defer gpa.free(new_env);
+    const new_conf = try at(gpa, buf[0..n], "not-yet/app.conf");
+    defer gpa.free(new_conf);
+
+    try testing.expect(isSecret(io, link));
+    try testing.expect(!isSecret(io, notes));
+    try testing.expect(isSecret(io, new_env));
+    try testing.expect(!isSecret(io, new_conf));
 }

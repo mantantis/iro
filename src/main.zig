@@ -953,6 +953,14 @@ pub const App = struct {
             null;
     }
 
+    /// Recovery files of secrets: a folder in RAM that only the user can
+    /// read and that is cleared at logout. `null`: there is none.
+    fn runtimeSwapDir(self: *App, buf: []u8) ?[]const u8 {
+        const run = self.env.get("XDG_RUNTIME_DIR") orelse return null;
+        if (!std.fs.path.isAbsolute(run)) return null;
+        return std.fmt.bufPrint(buf, "{s}/iro/swap", .{run}) catch null;
+    }
+
     /// Reads at start whether the hint bar was switched off.
     fn loadHintsChoice(self: *App) void {
         var buf: [Io.Dir.max_path_bytes]u8 = undefined;
@@ -979,8 +987,15 @@ pub const App = struct {
             self.gpa.free(p);
             self.d.swap_path = null;
         }
+        // Secrets (keys, tokens, owner-only files, sudoedit copies) never get a
+        // recovery file on disk. Theirs lives in RAM ($XDG_RUNTIME_DIR), which
+        // survives a crash of iro but is gone after logout. Without such a
+        // folder they get none.
+        const secret = if (self.d.path) |p| iro.history.isSecret(self.io, p) else false;
         var dir_buf: [Io.Dir.max_path_bytes]u8 = undefined;
-        const state_dir = self.statePath(&dir_buf, "swap") orelse return;
+        const swap_dir = if (secret) self.runtimeSwapDir(&dir_buf) else self.statePath(&dir_buf, "swap");
+        defer if (self.d.path != null) self.lockDoc(self.d);
+        const state_dir = swap_dir orelse return;
         const cwd = Io.Dir.cwd();
         cwd.createDirPath(self.io, state_dir) catch return;
         // Backups contain the content of open files, protected ones included.
@@ -988,7 +1003,6 @@ pub const App = struct {
         cwd.setFilePermissions(self.io, state_dir, fileio.private_dir, .{}) catch {};
         if (self.d.path) |path| {
             self.d.swap_path = try std.fmt.allocPrint(self.gpa, "{s}/{x:0>16}.swap", .{ state_dir, std.hash.Wyhash.hash(0, path) });
-            self.lockDoc(self.d);
         } else {
             // Even a file without a name is backed up. The name records which
             // iro has it open, so a second one leaves it alone.

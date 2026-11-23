@@ -187,12 +187,13 @@ fn checkExternal(gpa: Allocator, io: Io, kind: Checker, path: []const u8, conten
     const safe_base = if (isSafeFileName(raw_base)) raw_base else "check.tmp";
     var file_buf: [Io.Dir.max_path_bytes]u8 = undefined;
     const tmp_path = std.fmt.bufPrint(&file_buf, "{s}/{s}", .{ dir_path, safe_base }) catch return null;
+    var f = cwd.createFile(io, tmp_path, .{ .exclusive = true, .permissions = fileio.private_file }) catch return null;
+    // Registered before writing, so a failed write leaves no copy behind.
+    defer cwd.deleteFile(io, tmp_path) catch {};
     {
-        var f = cwd.createFile(io, tmp_path, .{ .exclusive = true, .permissions = fileio.private_file }) catch return null;
         defer f.close(io);
         f.writeStreamingAll(io, content) catch return null;
     }
-    defer cwd.deleteFile(io, tmp_path) catch {};
 
     const argv: []const []const u8 = switch (kind) {
         .fstab => &.{ "findmnt", "--verify", "--tab-file", tmp_path },

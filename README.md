@@ -92,6 +92,7 @@ Alt+G switches at any time, and the keys never change between gears.
   survive. Hard-linked files are written in place, so their links hold.
 - **Crash recovery:** unsaved work, even in tabs without a file name, is backed
   up within two seconds and offered back after a crash or a closed terminal.
+  Backups of secrets stay in RAM and are gone after logout.
 - **Earlier versions:** before every save, the old state goes into a local history,
   the last 20 per file. Alt+R brings one back. Secrets get no copies.
 - **Changed on disk?** Come back to iro and untouched tabs are already up to date.

@@ -29,6 +29,10 @@ All notable changes to iro are documented here. The format follows
   seconds so a stuck clipboard or dead mount cannot freeze iro.
 
 ### Security
+- Crash-recovery backups of secrets (keys, owner-only files, `sudoedit`
+  copies) are kept in RAM (`$XDG_RUNTIME_DIR`) instead of on disk.
+- Secret detection for history and backups ignores case (`.ENV`, `server.KEY`)
+  and follows symlinks to the real file.
 - The config sandbox no longer offers `print` and `string.dump`.
 - Pattern matching in `init.lua` (`string.find`, `match`, `gmatch`, `gsub`) now
   counts toward the step limit.

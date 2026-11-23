@@ -95,7 +95,8 @@ bleiben in beiden Gängen gleich.
   Hardlinks schreibt iro direkt, damit die Links halten.
 - **Wiederherstellung nach Absturz:** Ungespeichertes, auch in Tabs ohne
   Dateinamen, wird binnen zwei Sekunden gesichert und nach einem Absturz oder einem
-  geschlossenen Terminal wieder angeboten.
+  geschlossenen Terminal wieder angeboten. Sicherungen von Geheimnissen bleiben
+  im RAM und sind nach dem Abmelden weg.
 - **Frühere Versionen:** Vor jedem Speichern wandert der alte Stand in einen lokalen
   Verlauf, die letzten 20 pro Datei. Alt+R holt einen zurück. Geheimnisse bekommen
   keine Kopien.
