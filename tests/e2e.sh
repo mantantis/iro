@@ -52,7 +52,9 @@ ok "No longer modified"        '! screen | tail -1 | grep -q "●"'
 echo "Quitting with unsaved changes"
 keys C-g; lit '3'; keys Enter; keys End; lit ' NEU'; keys C-q
 ok "Prompt appears"        'screen | tail -1 | grep -qF "[V]erwerfen"'
-keys v; sleep 0.4
+# Answered in capitals, as the prompt shows it (Shift / Caps Lock).
+keys V; sleep 0.4
+ok "Capital letter answers the prompt" '[ "$(t display -p "#{pane_current_command}")" = "sleep" ]'
 ok "Discarded, file unchanged" '[ "$(tail -1 "$F")" = "  drei" ]'
 
 echo "Save as (F12)"

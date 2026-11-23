@@ -481,12 +481,25 @@ pub const App = struct {
     /// "Yes" in a prompt: J in German, Y in English. Only the letter currently
     /// shown counts.
     fn yes(self: *const App, key: vaxis.Key) bool {
-        return key.matches(if (self.lang == .en) 'y' else 'j', .{});
+        return letter(key, if (self.lang == .en) 'y' else 'j');
     }
 
     /// "Discard": V in German, D in English.
     fn discard(self: *const App, key: vaxis.Key) bool {
-        return key.matches(if (self.lang == .en) 'd' else 'v', .{});
+        return letter(key, if (self.lang == .en) 'd' else 'v');
+    }
+
+    /// A letter answering a question. The questions show it in capitals, so
+    /// Shift and Caps Lock count as well; with Ctrl, Alt or Super it is a
+    /// shortcut, not an answer.
+    fn letter(key: vaxis.Key, c: u8) bool {
+        const m = key.mods;
+        if (m.ctrl or m.alt or m.super or m.hyper or m.meta) return false;
+        const upper: u21 = std.ascii.toUpper(c);
+        if (key.codepoint == c or key.codepoint == upper) return true;
+        if (key.shifted_codepoint) |s| if (s == upper) return true;
+        if (key.text) |txt| return txt.len == 1 and std.ascii.toLower(txt[0]) == c;
+        return false;
     }
 
     /// Message in the UI language. The compiler checks both versions.
@@ -3209,11 +3222,11 @@ pub const App = struct {
         switch (kind) {
             .confirm_quit, .confirm_close => {
                 const quit = kind == .confirm_quit;
-                if (key.matches('s', .{}) or self.yes(key)) {
+                if (letter(key, 's') or self.yes(key)) {
                     self.closePrompt();
                     self.after_save = if (quit) .quit else .close;
                     self.save(.{});
-                } else if (self.discard(key) or key.matches('n', .{})) {
+                } else if (self.discard(key) or letter(key, 'n')) {
                     self.closePrompt();
                     if (quit and self.docs.items.len == 1) {
                         self.removeSwap(self.d);
@@ -3223,7 +3236,7 @@ pub const App = struct {
                         self.closeCurrent();
                         if (quit) self.requestQuit();
                     }
-                } else if (cp == Key.escape or key.matches(if (self.lang == .en) 'c' else 'a', .{})) {
+                } else if (cp == Key.escape or letter(key, if (self.lang == .en) 'c' else 'a')) {
                     self.closePrompt();
                 }
                 return;
@@ -3232,7 +3245,7 @@ pub const App = struct {
                 if (self.yes(key)) {
                     self.closePrompt();
                     self.treeTrash();
-                } else if (cp == Key.escape or key.matches('n', .{}) or key.matches('a', .{})) {
+                } else if (cp == Key.escape or letter(key, 'n') or letter(key, 'a')) {
                     self.closePrompt();
                 }
                 return;
@@ -3242,11 +3255,11 @@ pub const App = struct {
                     self.closePrompt();
                     // Overwriting is agreed; the Config Guard still has its say.
                     self.save(.{ .overwrite = true });
-                } else if (key.matches('l', .{})) {
+                } else if (letter(key, 'l')) {
                     self.closePrompt();
                     self.after_save = .stay;
                     self.loadOverMine();
-                } else if (cp == Key.escape or key.matches('n', .{})) {
+                } else if (cp == Key.escape or letter(key, 'n')) {
                     self.closePrompt();
                     self.after_save = .stay;
                 }
@@ -3257,14 +3270,14 @@ pub const App = struct {
                     const overwrite = self.guard_overwrite;
                     self.closePrompt();
                     self.save(.{ .overwrite = overwrite, .guard_ok = true });
-                } else if (cp == Key.escape or key.matches('n', .{}) or key.matches('a', .{})) {
+                } else if (cp == Key.escape or letter(key, 'n') or letter(key, 'a')) {
                     self.closePrompt();
                     self.after_save = .stay;
                 }
                 return;
             },
             .recover => {
-                if (key.matches(if (self.lang == .en) 'r' else 'w', .{}) or self.yes(key)) {
+                if (letter(key, if (self.lang == .en) 'r' else 'w') or self.yes(key)) {
                     self.closePrompt();
                     if (self.d.recover_text) |t| {
                         self.d.ed.selectAll();
@@ -3274,7 +3287,7 @@ pub const App = struct {
                         self.d.recover_text = null;
                         self.say(false, "Wiederhergestellt. Mit {s} übernehmen, mit {s} verwerfen.", "Restored. {s} keeps it, {s} throws it away.", .{ self.cfg.keyLabel(.save), self.cfg.keyLabel(.undo) });
                     }
-                } else if (self.discard(key) or key.matches('n', .{})) {
+                } else if (self.discard(key) or letter(key, 'n')) {
                     self.closePrompt();
                     if (self.d.recover_text) |t| self.gpa.free(t);
                     self.d.recover_text = null;
@@ -3288,7 +3301,7 @@ pub const App = struct {
                     self.pending_save_as = null;
                     self.closePrompt();
                     self.saveAs(path);
-                } else if (cp == Key.escape or key.matches('n', .{}) or key.matches('a', .{})) {
+                } else if (cp == Key.escape or letter(key, 'n') or letter(key, 'a')) {
                     self.closePrompt();
                     self.after_save = .stay;
                 }
@@ -3300,10 +3313,10 @@ pub const App = struct {
                     self.insertPasted(self.replace_with.items);
                     self.replace_count += 1;
                     self.replaceNext();
-                } else if (key.matches('n', .{})) {
+                } else if (letter(key, 'n')) {
                     if (ed.selection()) |sel| ed.setCursor(sel.end, false);
                     self.replaceNext();
-                } else if (key.matches('a', .{})) {
+                } else if (letter(key, 'a')) {
                     const from = if (ed.selection()) |sel| sel.start else ed.cursor;
                     ed.clearSelection();
                     const n = ed.replaceFrom(self.replace_needle.items, self.replace_with.items, from) catch 0;
