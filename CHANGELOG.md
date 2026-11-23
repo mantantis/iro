@@ -36,3 +36,5 @@ All notable changes to iro are documented here. The format follows
 - The config sandbox no longer offers `print` and `string.dump`.
 - Pattern matching in `init.lua` (`string.find`, `match`, `gmatch`, `gsub`) now
   counts toward the step limit.
+- `init.lua` can no longer hang iro: metatables with `__gc` are refused, and a
+  config that keeps catching the step limit with `pcall` is stopped.

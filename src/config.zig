@@ -999,6 +999,9 @@ pub const Config = struct {
         if (std.mem.indexOf(u8, full, too_long_de) != null) {
             return self.setErr(gpa, "abgebrochen: " ++ too_long_de, "aborted: the config takes too long (endless loop?)", .{});
         }
+        if (std.mem.indexOf(u8, full, no_gc_de) != null) {
+            return self.setErr(gpa, no_gc_de ++ " (setmetatable)", "__gc is not allowed in the config (setmetatable)", .{});
+        }
         for ([_][]const u8{ "init.lua:", "gewaehlt.lua:", "[string \"init.lua\"]:", "[string \"gewaehlt.lua\"]:" }) |prefix| {
             if (std.mem.startsWith(u8, full, prefix)) {
                 return self.setErr(gpa, "Zeile {s}", "Line {s}", .{full[prefix.len..]});
@@ -1036,7 +1039,12 @@ pub const Config = struct {
         // the libraries a config needs.
         var mem: LuaMem = .{};
         const L = lua_newstate(luaAlloc, &mem) orelse return error.OutOfMemory;
-        defer lua_close(L);
+        // Closing runs finalizers (`__gc`) written by the config; they get no
+        // steps at all, so a loop in one cannot hang iro.
+        defer {
+            stopLua(L, &mem);
+            lua_close(L);
+        }
         openSafeLibs(L);
         lua_sethook(L, luaBudgetHook, LUA_MASKCOUNT, lua_step_chunk);
 
@@ -1045,14 +1053,17 @@ pub const Config = struct {
             cfg.setLuaErr(gpa, L);
             return;
         }
-        if (lua_pcallk(L, 0, 0, 0, 0, null) != LUA_OK) {
+        const ran = lua_pcallk(L, 0, 0, 0, 0, null);
+        // The config has had its turn. Reading what it left behind must
+        // neither run its code nor fail for lack of memory: an error outside
+        // a protected call would abort iro.
+        stopLua(L, &mem);
+        if (ran != LUA_OK) {
             cfg.fatal_lua = true;
             cfg.setLuaErr(gpa, L);
             return;
         }
-        // From here on everything is only read, and "raw": without metatables,
-        // so no Lua code from the config can run during reading.
-        lua_sethook(L, null, 0, 0);
+        // From here on everything is only read, and "raw": without metatables.
         lua_settop(L, 0);
         _ = lua_rawgeti(L, LUA_REGISTRYINDEX, LUA_RIDX_GLOBALS); // sits at index 1
         // Map German names onto the English ones. Per layer, so a German init.lua
@@ -1634,12 +1645,25 @@ const lua_mem_limit = 32 * 1024 * 1024;
 /// charges its backtracking bound against the same budget.
 const lua_step_chunk = 100_000;
 const too_long_de = "die Config rechnet zu lange (Endlosschleife?)";
+const no_gc_de = "__gc ist in der Config nicht erlaubt";
 const lua_max_steps: u64 = 200 * lua_step_chunk; // 20 million steps
 
 const LuaMem = struct {
     used: usize = 0,
     steps: u64 = 0,
+    /// Only while the config itself runs; afterwards iro's own reading may
+    /// not fail on the limit.
+    enforce_limit: bool = true,
 };
+
+/// After the config has run: no more memory limit, and the step budget is
+/// spent for good, so any Lua code that still tries to run (a finalizer)
+/// stops at its first instruction.
+fn stopLua(L: *lua_State, mem: *LuaMem) void {
+    mem.enforce_limit = false;
+    mem.steps = lua_max_steps;
+    lua_sethook(L, luaBudgetHook, LUA_MASKCOUNT, 1);
+}
 
 fn luaAlloc(ud: ?*anyopaque, ptr: ?*anyopaque, osize: usize, nsize: usize) callconv(.c) ?*anyopaque {
     const mem: *LuaMem = @ptrCast(@alignCast(ud.?));
@@ -1650,7 +1674,7 @@ fn luaAlloc(ud: ?*anyopaque, ptr: ?*anyopaque, osize: usize, nsize: usize) callc
         mem.used -|= old;
         return null;
     }
-    if (nsize > old and mem.used + (nsize - old) > lua_mem_limit) return null;
+    if (mem.enforce_limit and nsize > old and mem.used + (nsize - old) > lua_mem_limit) return null;
     const new = realloc(ptr, nsize) orelse return null;
     mem.used = mem.used - @min(mem.used, old) + nsize;
     return new;
@@ -1663,6 +1687,9 @@ fn chargeLuaSteps(L: *lua_State, n: u64) void {
     const mem: *LuaMem = @ptrCast(@alignCast(ud.?));
     mem.steps +|= n;
     if (mem.steps >= lua_max_steps) {
+        // From now on every single instruction stops, so `pcall` in a loop
+        // cannot swallow the abort and carry on.
+        lua_sethook(L, luaBudgetHook, LUA_MASKCOUNT, 1);
         _ = luaL_error(L, "abgebrochen: " ++ too_long_de);
     }
 }
@@ -1677,12 +1704,13 @@ extern "c" fn lua_getallocf(L: *lua_State, ud: *?*anyopaque) lua_Alloc;
 /// subject of `s_len` bytes. Lua patterns have neither group quantifiers nor
 /// alternation, so only `*`, `+`, `-` (up to `s_len + 1` branches each) and `?`
 /// (up to 2 branches each) can multiply the work.
-fn patternWork(s_len: usize, pat: []const u8, plain: bool) u64 {
+fn patternWork(s_len: usize, pat: []const u8, plain: bool, can_anchor: bool) u64 {
     const n: u64 = s_len +| 1;
     const m: u64 = @max(pat.len, 1);
     if (plain) return n *| m;
 
-    const anchored = pat.len > 0 and pat[0] == '^';
+    // `gmatch` tries every position regardless of a leading `^`.
+    const anchored = can_anchor and pat.len > 0 and pat[0] == '^';
     var i: usize = if (anchored) 1 else 0;
     var work: u64 = if (anchored) m else n *| m;
 
@@ -1699,6 +1727,12 @@ fn patternWork(s_len: usize, pat: []const u8, plain: bool) u64 {
                     'f' => {
                         i += 2;
                         if (i < pat.len and pat[i] == '[') i = skipCharSet(pat, i);
+                        continue;
+                    },
+                    // A back-reference compares a whole capture again.
+                    '1'...'9' => {
+                        work *|= n;
+                        i += 2;
                         continue;
                     },
                     else => i += 2,
@@ -1737,7 +1771,7 @@ fn skipCharSet(pat: []const u8, start: usize) usize {
     return if (i < pat.len) i + 1 else pat.len;
 }
 
-fn checkPatternArgs(L: *lua_State, is_find: bool) u64 {
+fn checkPatternArgs(L: *lua_State, is_find: bool, can_anchor: bool) u64 {
     const top = lua_gettop(L);
     if (top < 2) return 1;
     const t1 = lua_type(L, 1);
@@ -1749,19 +1783,19 @@ fn checkPatternArgs(L: *lua_State, is_find: bool) u64 {
     var p_len: usize = 0;
     const p_ptr = lua_tolstring(L, 2, &p_len) orelse return 1;
     const plain = is_find and top >= 4 and lua_toboolean(L, 4) != 0;
-    const work = patternWork(s_len, p_ptr[0..p_len], plain);
+    const work = patternWork(s_len, p_ptr[0..p_len], plain, can_anchor);
     chargeLuaSteps(L, work);
     return work;
 }
 
 fn safeStrFind(L: *lua_State) callconv(.c) c_int {
-    _ = checkPatternArgs(L, true);
+    _ = checkPatternArgs(L, true, true);
     const orig = lua_tocfunction(L, luaUpvalueIndex(1)).?;
     return orig(L);
 }
 
 fn safeStrPattern(L: *lua_State) callconv(.c) c_int {
-    _ = checkPatternArgs(L, false);
+    _ = checkPatternArgs(L, false, true);
     const orig = lua_tocfunction(L, luaUpvalueIndex(1)).?;
     return orig(L);
 }
@@ -1776,13 +1810,27 @@ fn safeGmatchIter(L: *lua_State) callconv(.c) c_int {
 }
 
 fn safeStrGmatch(L: *lua_State) callconv(.c) c_int {
-    const work = checkPatternArgs(L, false);
+    const work = checkPatternArgs(L, false, false);
     const orig = lua_tocfunction(L, luaUpvalueIndex(1)).?;
     const nret = orig(L);
     if (nret != 1) return nret;
     lua_pushinteger(L, @intCast(@min(work, std.math.maxInt(lua_Integer))));
     lua_pushcclosure(L, safeGmatchIter, 2);
     return 1;
+}
+
+/// `setmetatable` without finalizers. Lua decides whether an object gets one
+/// when the metatable is set, by a raw look at its `__gc` field, so checking
+/// right here is enough.
+fn safeSetmetatable(L: *lua_State) callconv(.c) c_int {
+    if (lua_type(L, 2) == LUA_TTABLE) {
+        _ = lua_pushstring(L, "__gc");
+        const tp = lua_rawget(L, 2);
+        luaPop(L, 1);
+        if (tp != LUA_TNIL) return luaL_error(L, no_gc_de);
+    }
+    const orig = lua_tocfunction(L, luaUpvalueIndex(1)).?;
+    return orig(L);
 }
 
 fn wrapStringFn(L: *lua_State, name: [*:0]const u8, wrapper: lua_CFunction) void {
@@ -1813,6 +1861,11 @@ fn openSafeLibs(L: *lua_State) void {
         lua_pushnil(L);
         lua_setglobal(L, name);
     }
+    // Finalizers (`__gc`) run with Lua's hooks switched off, so the step
+    // budget cannot stop a loop in one. A config has no use for them.
+    _ = lua_getglobal(L, "setmetatable");
+    lua_pushcclosure(L, safeSetmetatable, 1);
+    lua_setglobal(L, "setmetatable");
     // Turns functions into bytecode. Useless without `load`, so it goes as well.
     // Pattern matching runs in C, where the VM instruction hook cannot see it,
     // so it is wrapped to count toward the step budget.
@@ -2155,6 +2208,59 @@ test "config on a leash: endless loop, metatables, blocked functions" {
         try std.testing.expectEqual(@as(usize, 2), cfg.tab_width);
         try std.testing.expectEqualStrings("mohawk", cfg.theme_name);
     }
+}
+
+test "config cannot escape the leash: finalizers, pcall loops, full memory" {
+    const gpa = std.testing.allocator;
+    {
+        // A finalizer with an endless loop used to hang iro in lua_close.
+        // Lua runs finalizers with hooks off, so they are refused outright.
+        var cfg = try Config.loadFromSlice(gpa,
+            \\setmetatable({}, { __gc = function() while true do end end })
+        );
+        defer cfg.deinit(gpa);
+        try std.testing.expect(cfg.fatal_lua);
+        try std.testing.expect(std.mem.indexOf(u8, cfg.err_msg.?, "__gc") != null);
+    }
+    {
+        // Adding __gc afterwards does not make an object finalizable in Lua;
+        // ordinary metatables keep working.
+        var cfg = try Config.loadFromSlice(gpa,
+            \\local mt = { __index = function() return 7 end }
+            \\local t = setmetatable({}, mt)
+            \\mt.__gc = function() while true do end end
+            \\tab_width = t.anything
+        );
+        defer cfg.deinit(gpa);
+        try std.testing.expect(cfg.err_msg == null);
+        try std.testing.expectEqual(@as(usize, 7), cfg.tab_width);
+    }
+    {
+        // pcall used to swallow every abort and carry on forever.
+        var cfg = try Config.loadFromSlice(gpa, "while true do pcall(function() while true do end end) end");
+        defer cfg.deinit(gpa);
+        try std.testing.expect(cfg.fatal_lua);
+        try std.testing.expect(std.mem.indexOf(u8, cfg.err_msg.?, "zu lange") != null);
+    }
+    {
+        // Settings first, then memory filled to the last byte: reading
+        // afterwards must still work instead of aborting iro.
+        var cfg = try Config.loadFromSlice(gpa,
+            \\tab_width = 5
+            \\keys = { save = "Ctrl+W" }
+            \\local i = 0
+            \\for _, n in ipairs({1000000, 100000, 10000, 1000, 100, 41, 1}) do
+            \\  pcall(function() while true do i = i + 1; keep = { ("y"):rep(n) .. i, keep } end end)
+            \\end
+        );
+        defer cfg.deinit(gpa);
+        try std.testing.expectEqual(@as(usize, 5), cfg.tab_width);
+        try std.testing.expectEqualStrings("Strg+W", cfg.keyLabel(.save));
+    }
+    // gmatch ignores a leading `^`; back-references cost a pass each.
+    try std.testing.expect(patternWork(1000, "^z", false, false) >= 1000);
+    try std.testing.expect(patternWork(1000, "^z", false, true) < 1000);
+    try std.testing.expect(patternWork(1000, "(a)%1%1", false, true) >= 1000 * 1000);
 }
 
 test "theme, switches and automatic colours" {
