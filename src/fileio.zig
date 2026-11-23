@@ -214,14 +214,20 @@ pub fn writeAtomicMode(io: Io, dir: Io.Dir, path: []const u8, bytes: []const u8,
     // everyone.
     const wanted: ?Io.File.Permissions = if (old_stat) |st| st.permissions else fresh;
 
-    var tdir = dir.openDir(io, dir_path, .{}) catch return writeInPlace(io, dir, target, bytes, fresh);
+    // Only a missing permission justifies falling back to overwriting in place.
+    // Any other error (full disk, quota, name too long) is reported, and the
+    // file on disk stays untouched.
+    var tdir = dir.openDir(io, dir_path, .{}) catch |err| switch (err) {
+        error.AccessDenied, error.PermissionDenied => return writeInPlace(io, dir, target, bytes, fresh),
+        else => return err,
+    };
     defer tdir.close(io);
 
     var rnd: [8]u8 = undefined;
     io.random(&rnd);
-    var name_buf: [300]u8 = undefined;
+    var name_buf: [128]u8 = undefined;
     const tmp_name = std.fmt.bufPrint(&name_buf, ".{s}.iro-{x}.tmp", .{
-        base[0..@min(base.len, 200)],
+        tmpPrefix(base),
         std.mem.readInt(u64, &rnd, .little),
     }) catch unreachable;
 
@@ -232,7 +238,10 @@ pub fn writeAtomicMode(io: Io, dir: Io.Dir, path: []const u8, bytes: []const u8,
         // Never allow more than owner-only at creation, until the final mode is
         // set.
         .permissions = private_file,
-    }) catch return writeInPlace(io, dir, target, bytes, fresh);
+    }) catch |err| switch (err) {
+        error.AccessDenied, error.PermissionDenied => return writeInPlace(io, dir, target, bytes, fresh),
+        else => return err,
+    };
     var file_open = true;
     errdefer {
         if (file_open) file.close(io);
@@ -323,10 +332,35 @@ fn syncDir(dir: Io.Dir) void {
     _ = std.os.linux.fsync(dir.handle);
 }
 
+/// Start of the file name for the temporary file. Kept short because some file
+/// systems (eCryptfs) allow far less than 255 bytes per name, and cut only
+/// between whole UTF-8 characters.
+fn tmpPrefix(base: []const u8) []const u8 {
+    var n = @min(base.len, 64);
+    while (n > 0 and n < base.len and (base[n] & 0xC0) == 0x80) n -= 1;
+    return base[0..n];
+}
+
+/// Overwrites the file itself. Used only when the replace-by-rename way is not
+/// possible. The old content is not cut off up front: space for the new content
+/// is reserved first, and the file is shortened only after everything has been
+/// written. On a full disk the old file stays as it was. (Copy-on-write file
+/// systems like btrfs can still run out of space while overwriting; then the
+/// file is mixed, but never empty.)
 fn writeInPlace(io: Io, dir: Io.Dir, target: []const u8, bytes: []const u8, fresh: ?Io.File.Permissions) !void {
-    var file = try dir.createFile(io, target, .{ .permissions = fresh orelse .default_file });
+    var file = try dir.createFile(io, target, .{ .truncate = false, .permissions = fresh orelse .default_file });
     defer file.close(io);
-    try file.writeStreamingAll(io, bytes);
+    if (@import("builtin").os.tag == .linux and bytes.len > 0) {
+        switch (linux.errno(linux.fallocate(file.handle, 0, 0, @intCast(bytes.len)))) {
+            .NOSPC => return error.NoSpaceLeft,
+            .DQUOT => return error.DiskQuota,
+            // Not supported everywhere (some network and FUSE file systems);
+            // then writing has to show whether there is room.
+            else => {},
+        }
+    }
+    try file.writePositionalAll(io, bytes, 0);
+    try file.setLength(io, bytes.len);
     try file.sync(io);
 }
 
@@ -482,6 +516,40 @@ test "hard links keep sharing the content" {
     try testing.expectEqualStrings("neu\n", raw);
     const st = try tmp.dir.statFile(io, "eins.conf", .{});
     try testing.expectEqual(@as(@TypeOf(st.nlink), 2), st.nlink);
+}
+
+test "overwriting in place leaves no old tail and keeps longer content whole" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const io = testing.io;
+
+    try writeAtomic(io, tmp.dir, "a.conf", "a rather long old line\n");
+    try writeInPlace(io, tmp.dir, "a.conf", "short\n", null);
+    const shorter = try tmp.dir.readFileAlloc(io, "a.conf", testing.allocator, .limited(1024));
+    defer testing.allocator.free(shorter);
+    try testing.expectEqualStrings("short\n", shorter);
+
+    try writeInPlace(io, tmp.dir, "a.conf", "now longer than before\n", null);
+    const longer = try tmp.dir.readFileAlloc(io, "a.conf", testing.allocator, .limited(1024));
+    defer testing.allocator.free(longer);
+    try testing.expectEqualStrings("now longer than before\n", longer);
+
+    try writeInPlace(io, tmp.dir, "a.conf", "", null);
+    const st = try tmp.dir.statFile(io, "a.conf", .{});
+    try testing.expectEqual(@as(u64, 0), st.size);
+}
+
+test "temporary name prefix is short and cut between characters" {
+    try testing.expectEqualStrings("kitty.conf", tmpPrefix("kitty.conf"));
+    // "x" + 40 × "ä" (2 bytes each): byte 64 is the middle of an "ä".
+    var buf: [81]u8 = undefined;
+    buf[0] = 'x';
+    for (0..40) |i| @memcpy(buf[1 + 2 * i ..][0..2], "ä");
+    const p = tmpPrefix(&buf);
+    try testing.expectEqual(@as(usize, 63), p.len);
+    try testing.expect(std.unicode.utf8ValidateSlice(p));
+    // Without the "x", byte 64 starts a new "ä": nothing to cut back.
+    try testing.expectEqual(@as(usize, 64), tmpPrefix(buf[1..]).len);
 }
 
 test "extended attributes survive saving" {
