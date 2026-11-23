@@ -86,9 +86,23 @@ pub fn detect(path: []const u8, content: []const u8) ?Checker {
 }
 
 /// Does `path` look like a Hyprland config file? Checked after saving via
-/// `hyprctl configerrors`.
+/// `hyprctl configerrors`. Current Hyprland reads Lua (`hyprland.lua` and the
+/// files it requires); older versions read `hyprland.conf`. The other Hypr
+/// tools (hyprlock, hypridle, …) keep their own *.conf files in the same
+/// folder. Hyprland never reads those, so its error list says nothing about them.
 pub fn isHyprConfig(path: []const u8) bool {
-    return std.mem.endsWith(u8, path, ".conf") and std.mem.indexOf(u8, path, "/hypr/") != null;
+    if (std.mem.indexOf(u8, path, "/hypr/") == null) return false;
+    const base = std.fs.path.basename(path);
+    if (std.mem.endsWith(u8, base, ".lua")) return true;
+    if (!std.mem.endsWith(u8, base, ".conf")) return false;
+    const other_tools = [_][]const u8{ "hyprlock", "hypridle", "hyprpaper", "hyprsunset", "hyprtoolkit", "xdph" };
+    for (other_tools) |tool| {
+        if (std.mem.startsWith(u8, base, tool)) return false;
+        var seg_buf: [32]u8 = undefined;
+        const seg = std.fmt.bufPrint(&seg_buf, "/{s}/", .{tool}) catch unreachable;
+        if (std.mem.indexOf(u8, path, seg) != null) return false;
+    }
+    return true;
 }
 
 fn shebangShell(content: []const u8) ?Checker {
@@ -323,6 +337,19 @@ test "detect matches known configs and respects shebangs" {
     try testing.expectEqual(@as(?Checker, null), detect("/home/u/notes.txt", "hello\n"));
     try testing.expect(isHyprConfig("/home/u/.config/hypr/hyprland.conf"));
     try testing.expect(!isHyprConfig("/home/u/.config/kitty/kitty.conf"));
+}
+
+test "Hyprland check covers Lua configs and skips the other Hypr tools" {
+    try testing.expect(isHyprConfig("/home/u/.config/hypr/hyprland.lua"));
+    try testing.expect(isHyprConfig("/home/u/.config/hypr/custom/keybinds.lua"));
+    try testing.expect(isHyprConfig("/home/u/.config/hypr/hyprland.conf"));
+    try testing.expect(isHyprConfig("/home/u/.config/hypr/monitors.conf"));
+    try testing.expect(!isHyprConfig("/home/u/.config/hypr/hyprlock.conf"));
+    try testing.expect(!isHyprConfig("/home/u/.config/hypr/hypridle.conf"));
+    try testing.expect(!isHyprConfig("/home/u/.config/hypr/hyprpaper.conf"));
+    try testing.expect(!isHyprConfig("/home/u/.config/hypr/hyprlock/colors.conf"));
+    try testing.expect(!isHyprConfig("/home/u/.config/nvim/init.lua"));
+    try testing.expect(!isHyprConfig("/home/u/.config/hypr/README.md"));
 }
 
 test "JSON Config Guard catches syntax errors with line numbers" {
