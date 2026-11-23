@@ -1317,22 +1317,37 @@ pub const App = struct {
         const old_path = d.path;
         const old_swap = d.swap_path;
         const old_disk = d.meta.disk;
+        const old_read_only = d.read_only;
         d.swap_path = null;
         d.path = new_path;
         d.meta.disk = null;
         self.initSwapPath() catch {};
-        self.save(.{ .overwrite = true });
+        // Another iro has the target open: writing into it would destroy its
+        // work, so nothing is saved.
+        const foreign = d.foreign;
+        if (foreign == null) self.save(.{ .overwrite = true });
         // If the Config Guard asks first, the tab keeps its new name; the
         // answer then saves under it (or not).
         const guard_asks = if (self.prompt) |p| p.kind == .confirm_guard else false;
-        if (!self.save_ok and !guard_asks) {
+        if (foreign != null or (!self.save_ok and !guard_asks)) {
             // Back to square one; the error message from `save` stays.
             if (d.swap_path) |p| gpa.free(p);
             d.swap_path = old_swap;
             d.path = old_path;
             d.meta.disk = old_disk;
-            gpa.free(new_path);
             self.lockDoc(d);
+            // A tab without a file has no lock to decide; it keeps what it
+            // was (the help stays read-only, an unnamed text stays editable).
+            if (old_path == null) d.read_only = old_read_only;
+            if (foreign) |pid| {
+                const name = std.fs.path.basename(new_path);
+                if (pid != 0) {
+                    self.say(true, "Nicht gespeichert: {s} ist schon in iro PID {d} offen", "Not saved: {s} is already open in iro PID {d}", .{ name, pid });
+                } else {
+                    self.say(true, "Nicht gespeichert: {s} ist schon in einem anderen iro offen", "Not saved: {s} is already open in another iro", .{name});
+                }
+            }
+            gpa.free(new_path);
             return;
         }
         // The backup under the old name is obsolete. If it stayed, iro would wrongly offer
