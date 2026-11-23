@@ -4181,6 +4181,11 @@ pub fn main(init: std.process.Init) !void {
     var loop: Loop = .init(io, &tty, &vx);
     try loop.start();
     defer loop.stop();
+    // Terminals that report size changes themselves (kitty, foot, ghostty)
+    // need no signal; for all others SIGWINCH is the only way to notice a
+    // resize. Once the terminal reports in-band, vaxis ignores the signal.
+    try loop.installResizeHandler();
+    defer loop.uninstallResizeHandler();
     app.loop = &loop;
     if (app.start_dir) |d| app.search_dir = gpa.dupe(u8, d) catch null;
     app.loadRecent();
