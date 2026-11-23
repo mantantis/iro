@@ -1356,6 +1356,8 @@ pub const default_init_lua_de =
     \\-- Esc → Einstellungen. Die Klicks landen in gewaehlt.lua, was in DIESER
     \\-- Datei steht, gewinnt. Die Namen sind englisch, die alten deutschen
     \\-- (tab_breite, thema, tasten …) versteht iro weiterhin.
+    \\-- Zeilen mit -- davor zeigen nur den Standard. Erst ohne -- gilt der Wert,
+    \\-- und die Einstellungsseite sperrt ihn dann (Schloss).
     \\
     \\-- Sprache der Oberfläche: "de", "en" oder "auto" (wie das System, LANG).
     \\-- language = "auto"
@@ -1370,35 +1372,35 @@ pub const default_init_lua_de =
     \\-- hints = true
     \\
     \\-- Tab-Breite und Einrückung
-    \\tab_width = 4
+    \\-- tab_width = 4
     \\-- spaces = true    -- true = Leerzeichen, false = echte Tabs (weglassen = pro Datei erkennen)
     \\
     \\-- Dateibaum beim Start gleich öffnen (nur in Forge) & Punkt-Dateien anzeigen
-    \\tree_on_start = false
-    \\dotfiles = true
+    \\-- tree_on_start = false
+    \\-- dotfiles = true
     \\
     \\-- Startseite mit Logo, wenn iro ohne Datei startet
-    \\start_screen = true
+    \\-- start_screen = true
     \\
     \\-- Frühere Versionen jeder gespeicherten Datei aufheben (Alt+R holt sie zurück).
     \\-- Dateien, die nur du lesen darfst, und Schlüssel bekommen nie Kopien.
-    \\history = true
+    \\-- history = true
     \\
     \\-- Config Guard: bekannte Configs (fstab, sudoers, sshd, systemd, Shell, JSON, Hyprland)
     \\-- beim Speichern prüfen und bei Fehlern warnen.
-    \\config_guard = true
+    \\-- config_guard = true
     \\
     \\-- Optik. Alles einzeln abschaltbar (false).
-    \\icons = true             -- Nerd-Font-Symbole in Baum, Tabs und Statuszeile
-    \\indent_guides = true     -- feine Linien in der Einrückung
-    \\scrollbar = true         -- schmaler Balken rechts bei langen Dateien
-    \\minimap = true           -- Braille-Minimap rechts bei langen Dateien (in Forge)
-    \\-- wrap = false          -- lange Zeilen am Fensterrand umbrechen (Alt+W)
-    \\animations = true        -- weiches Baum-Gleiten und Zeilen-Puls
-    \\git_gutter = true        -- neben den Zeilennummern: neu, geändert, weg (in Forge)
-    \\trailing_spaces = true   -- überflüssige Leerzeichen am Zeilenende zeigen
-    \\brackets = true          -- Klammer am Cursor und ihr Gegenstück hervorheben
-    \\esc_menu = true          -- Esc holt das Hauptmenü (wenn nichts anderes aufzuheben ist)
+    \\-- icons = true           -- Nerd-Font-Symbole in Baum, Tabs und Statuszeile
+    \\-- indent_guides = true   -- feine Linien in der Einrückung
+    \\-- scrollbar = true       -- schmaler Balken rechts bei langen Dateien
+    \\-- minimap = true         -- Braille-Minimap rechts bei langen Dateien (in Forge)
+    \\-- wrap = false           -- lange Zeilen am Fensterrand umbrechen (Alt+W)
+    \\-- animations = true      -- weiches Baum-Gleiten und Zeilen-Puls
+    \\-- git_gutter = true      -- neben den Zeilennummern: neu, geändert, weg (in Forge)
+    \\-- trailing_spaces = true -- überflüssige Leerzeichen am Zeilenende zeigen
+    \\-- brackets = true        -- Klammer am Cursor und ihr Gegenstück hervorheben
+    \\-- esc_menu = true        -- Esc holt das Hauptmenü (wenn nichts anderes aufzuheben ist)
     \\
     \\-- Fertiger Farbsatz. "terminal" nimmt die Farben deines Terminals und folgt
     \\-- damit dem Wallpaper. Sonst: "mohawk", "nord", "gruvbox", "catppuccin", "tokyonacht",
@@ -1420,8 +1422,8 @@ pub const default_init_lua_de =
     \\    -- minimap = "Alt+M",
     \\    -- gear = "Alt+G",
     \\    -- palette = "Strg+P",
-    \\    -- open_config = "Strg+,",
-    \\    -- reload_config = "F5",
+    \\    -- open_config = "",           -- ohne Taste, z. B. "Strg+,"
+    \\    -- reload_config = "",         -- ohne Taste, z. B. "F5"
     \\    -- replace = "Strg+R",
     \\    -- comment = "Strg+K",
     \\    -- duplicate_line = "Strg+D",
@@ -1458,6 +1460,8 @@ pub const default_init_lua_en =
     \\-- Saving applies them right away. Most of this can also be clicked:
     \\-- Esc → Settings. The clicks go to gewaehlt.lua, and what's in THIS
     \\-- file wins.
+    \\-- Lines starting with -- only show the default. Remove the -- and the
+    \\-- value applies, and the settings page locks it (padlock).
     \\
     \\-- Interface language: "en", "de" or "auto" (like the system, LANG).
     \\-- language = "auto"
@@ -1472,35 +1476,35 @@ pub const default_init_lua_en =
     \\-- hints = true
     \\
     \\-- Tab width and indentation
-    \\tab_width = 4
+    \\-- tab_width = 4
     \\-- spaces = true    -- true = spaces, false = real tabs (leave out = detect per file)
     \\
     \\-- Open the file tree right at startup (Forge only) & show dotfiles
-    \\tree_on_start = false
-    \\dotfiles = true
+    \\-- tree_on_start = false
+    \\-- dotfiles = true
     \\
     \\-- Start screen with the logo when iro starts without a file
-    \\start_screen = true
+    \\-- start_screen = true
     \\
     \\-- Keep earlier versions of every file you save (Alt+R brings them back).
     \\-- Files only you may read, and keys, never get copies.
-    \\history = true
+    \\-- history = true
     \\
     \\-- Config Guard: check known configs (fstab, sudoers, sshd, systemd, shell, JSON, Hyprland)
     \\-- on save and warn before writing broken syntax.
-    \\config_guard = true
+    \\-- config_guard = true
     \\
     \\-- Looks. Each one can be switched off (false).
-    \\icons = true             -- Nerd Font icons in the tree, tabs and status bar
-    \\indent_guides = true     -- thin lines inside the indentation
-    \\scrollbar = true         -- slim bar on the right for long files
-    \\minimap = true           -- Braille minimap on the right for long files (in Forge)
-    \\-- wrap = false          -- wrap long lines at the window edge (Alt+W)
-    \\animations = true        -- smooth tree slide and line pulse
-    \\git_gutter = true        -- next to the line numbers: new, changed, gone (in Forge)
-    \\trailing_spaces = true   -- show stray spaces at the end of lines
-    \\brackets = true          -- highlight the bracket at the cursor and its partner
-    \\esc_menu = true          -- Esc opens the main menu (when there's nothing else to cancel)
+    \\-- icons = true           -- Nerd Font icons in the tree, tabs and status bar
+    \\-- indent_guides = true   -- thin lines inside the indentation
+    \\-- scrollbar = true       -- slim bar on the right for long files
+    \\-- minimap = true         -- Braille minimap on the right for long files (in Forge)
+    \\-- wrap = false           -- wrap long lines at the window edge (Alt+W)
+    \\-- animations = true      -- smooth tree slide and line pulse
+    \\-- git_gutter = true      -- next to the line numbers: new, changed, gone (in Forge)
+    \\-- trailing_spaces = true -- show stray spaces at the end of lines
+    \\-- brackets = true        -- highlight the bracket at the cursor and its partner
+    \\-- esc_menu = true        -- Esc opens the main menu (when there's nothing else to cancel)
     \\
     \\-- Ready-made color scheme. "terminal" uses your terminal's colors and so
     \\-- follows your wallpaper. Others: "mohawk", "nord", "gruvbox", "catppuccin", "tokyonacht",
@@ -1522,8 +1526,8 @@ pub const default_init_lua_en =
     \\    -- minimap = "Alt+M",
     \\    -- gear = "Alt+G",
     \\    -- palette = "Ctrl+P",
-    \\    -- open_config = "Ctrl+,",
-    \\    -- reload_config = "F5",
+    \\    -- open_config = "",           -- no key by default, e.g. "Ctrl+,"
+    \\    -- reload_config = "",         -- no key by default, e.g. "F5"
     \\    -- replace = "Ctrl+R",
     \\    -- comment = "Ctrl+K",
     \\    -- duplicate_line = "Ctrl+D",
@@ -2181,6 +2185,16 @@ test "theme, switches and automatic colours" {
         defer tpl.deinit(gpa);
         try std.testing.expect(tpl.err_msg == null);
         try std.testing.expect(tpl.minimap and tpl.symbols and tpl.tab_width == 4);
+        // Merely creating init.lua must not lock any setting ... (The empty
+        // `colors = {}` table counts as set, but no settings item shows colors.)
+        for (tpl.pinned, pin_names) |p, name| {
+            if (!std.mem.eql(u8, name, "colors")) try std.testing.expect(!p);
+        }
+        for (tpl.pinned_keys) |p| try std.testing.expect(!p);
+        // ... nor overrule what was clicked on the settings page before.
+        var clicked = try Config.loadLayered(gpa, "minimap = false\ntab_width = 2\n", defaultInitLua(l));
+        defer clicked.deinit(gpa);
+        try std.testing.expect(!clicked.minimap and clicked.tab_width == 2);
     }
 
     var rice = try Config.loadFromSlice(gpa,
