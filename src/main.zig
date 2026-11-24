@@ -2071,6 +2071,34 @@ pub const App = struct {
         self.d.ed.setCursor(.{ .line = self.d.ed.cursor.line, .col = 0 }, false);
     }
 
+    /// The terminal has delivered the whole pasted text. It goes where typing
+    /// would go: into the open input line, or into the text. Menus, the
+    /// settings page and the about card take no text, and with the focus in
+    /// the file tree it must not land in the file behind it either.
+    fn finishPaste(self: *App) void {
+        self.pasting = false;
+        self.paste_buf.items.len = text.unifyLineBreaks(self.paste_buf.items).len;
+        const txt = self.paste_buf.items;
+        if (txt.len == 0) return;
+        if (self.about != null or self.settings_open or self.menu_open) return;
+        // In an input line, take only the first line.
+        const first = std.mem.sliceTo(txt, '\n');
+        if (self.palette) |*p| {
+            p.input.appendSlice(self.gpa, first) catch {};
+            p.selected = 0;
+            p.stale = true;
+        } else if (self.prompt) |*p| {
+            p.input.appendSlice(self.gpa, first) catch {};
+            if (p.kind == .search or p.kind == .replace_find) self.runSearch(true, true);
+        } else if (self.focus == .tree) {
+            self.say(true, "Einfügen geht nur im Text ({s} wechselt dorthin)", "Pasting only works in the text ({s} goes there)", .{"Esc"});
+        } else {
+            self.closeComp();
+            self.insertPasted(txt);
+            self.d.follow = true;
+        }
+    }
+
     fn insertPasted(self: *App, txt: []const u8) void {
         if (self.locked()) return;
         self.d.ed.insertText(txt) catch |err| switch (err) {
@@ -3597,7 +3625,11 @@ pub const App = struct {
             // Pasted text arrives as a sequence of keys. We collect it and
             // insert it in one piece at the end (one undo step).
             const gpa = self.gpa;
-            if (cp == Key.enter or (cp == 'j' and key.mods.ctrl)) {
+            // The terminal sends CR as Enter and LF as Ctrl+J. Kept as they
+            // are and turned into line breaks at the end, so CRLF becomes one.
+            if (cp == Key.enter) {
+                self.paste_buf.append(gpa, '\r') catch {};
+            } else if (cp == 'j' and key.mods.ctrl) {
                 self.paste_buf.append(gpa, '\n') catch {};
             } else if (cp == Key.tab) {
                 self.paste_buf.append(gpa, '\t') catch {};
@@ -4391,22 +4423,7 @@ pub fn main(init: std.process.Init) !void {
                 app.pasting = true;
                 app.paste_buf.clearRetainingCapacity();
             },
-            .paste_end => {
-                app.pasting = false;
-                if (app.palette) |*p| {
-                    p.input.appendSlice(gpa, std.mem.sliceTo(app.paste_buf.items, '\n')) catch {};
-                    p.selected = 0;
-                    p.stale = true;
-                } else if (app.prompt) |*p| {
-                    // In the input line, take only the first line.
-                    const first = std.mem.sliceTo(app.paste_buf.items, '\n');
-                    p.input.appendSlice(gpa, first) catch {};
-                    if (p.kind == .search or p.kind == .replace_find) app.runSearch(true, true);
-                } else if (app.paste_buf.items.len > 0) {
-                    app.insertPasted(app.paste_buf.items);
-                    app.d.follow = true;
-                }
-            },
+            .paste_end => app.finishPaste(),
             .index_progress => {
                 app.onIndexProgress();
                 // Only redraw if the file search is currently open.

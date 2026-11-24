@@ -120,6 +120,19 @@ keys C-z
 ok "Undo brings the line back"      'screen | sed -n 2p | grep -q "eingerückt"'
 keys C-q; sleep 0.3
 
+echo "Pasting (bracketed paste)"
+P="$E/paste.txt"; printf 'oben\n' > "$P"
+paste() { t set-buffer -- "$1"; t paste-buffer -p -r; sleep 0.4; }
+start "$P"; keys C-End
+paste $'\neins\r\nzwei\rdrei'
+ok "CRLF and CR become single line breaks" '[ "$(screen | sed -n 2p)" = "  2 eins" ] && [ "$(screen | sed -n 3p)" = "  3 zwei" ] && [ "$(screen | sed -n 4p)" = "  4 drei" ]'
+keys C-s; sleep 0.3
+keys Escape; sleep 0.3; paste 'HINTER DEM MENÜ'; keys Escape; sleep 0.3
+ok "Nothing lands behind the open menu" '! screen | grep -q "HINTER DEM MENÜ" && ! screen | tail -1 | grep -q "●"'
+keys C-b; sleep 0.4; paste 'HINTER DEM BAUM'
+ok "Nothing lands behind the focused tree" '! screen | grep -q "HINTER DEM BAUM" && screen | tail -1 | grep -q "Einfügen geht nur im Text"'
+keys C-q; sleep 0.3
+
 echo "File tree (Ctrl+B)"
 mkdir -p "$E/baum/unter"
 printf 'eins\n' > "$E/baum/a.txt"; printf 'zwei\n' > "$E/baum/b.txt"; printf 'tief\n' > "$E/baum/unter/c.txt"

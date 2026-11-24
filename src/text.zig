@@ -137,6 +137,27 @@ pub fn neutralize(buf: []u8) []u8 {
 /// Makes a name (file, folder) safe for the title and status line: control and
 /// invisible characters become "?". Without such characters the name comes back
 /// unchanged, without allocating.
+/// Turns CRLF and lone CR into LF, in place. Returns the shortened text.
+pub fn unifyLineBreaks(buf: []u8) []u8 {
+    var w: usize = 0;
+    var i: usize = 0;
+    while (i < buf.len) : (i += 1) {
+        if (buf[i] == '\r') {
+            buf[w] = '\n';
+            if (i + 1 < buf.len and buf[i + 1] == '\n') i += 1;
+        } else buf[w] = buf[i];
+        w += 1;
+    }
+    return buf[0..w];
+}
+
+test "line breaks from any system become LF" {
+    var buf = "a\r\nb\rc\nd\r\r\ne\r".*;
+    try std.testing.expectEqualStrings("a\nb\nc\nd\n\ne\n", unifyLineBreaks(&buf));
+    var none = "kein umbruch".*;
+    try std.testing.expectEqualStrings("kein umbruch", unifyLineBreaks(&none));
+}
+
 pub fn cleanName(arena: std.mem.Allocator, name: []const u8) []const u8 {
     var dirty = false;
     var view = std.unicode.Utf8View.init(name) catch return "?";
