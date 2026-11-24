@@ -18,6 +18,9 @@ All notable changes to iro are documented here. The format follows
 - Files changed by another program reload when you return to iro, if the tab has
   no unsaved changes. Otherwise iro warns, and the overwrite question can load the
   file from disk instead.
+- Closing the terminal window, logging out or `killall iro` (SIGHUP, SIGTERM)
+  backs up unsaved changes at once and restores the terminal. The next start
+  offers to recover them.
 
 ### Changed
 - Command palette, file search, version history and word completion now share

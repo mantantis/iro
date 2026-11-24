@@ -77,6 +77,22 @@ keys w; keys C-s; keys C-q; sleep 0.4
 ok "Change is back"        '[ "$(tail -1 "$F")" = "  drei UNGESICHERT" ]'
 ok "Backup cleaned up"       '[ -z "$(ls "$XDG_STATE_HOME/iro/swap" 2>/dev/null)" ]'
 
+echo "SIGTERM and SIGHUP back up at once and leave cleanly"
+before="$(cat "$F")"
+# Well inside the two seconds before the regular backup.
+start "$F"; keys C-End; lit ' PERTERM'; sleep 0.3
+pkill -TERM -P "$(t list-panes -F '#{pane_pid}')" -x iro; sleep 0.8
+ok "SIGTERM ends iro and leaves the alternate screen" '[ "$(t display -p "#{pane_current_command}")" = "sleep" ] && [ "$(t display -p "#{alternate_on}")" = "0" ]'
+ok "SIGTERM backed up the last change" 'grep -rq "PERTERM" "$XDG_STATE_HOME/iro/swap"'
+start "$F"
+ok "Backup is offered after SIGTERM" 'screen | tail -1 | grep -qF "[W]iederherstellen"'
+keys v; sleep 0.2; keys C-End; lit ' PERHUP'; sleep 0.3
+# Closing the terminal window sends SIGHUP.
+t kill-server; sleep 0.8
+ok "SIGHUP backed up the last change" 'grep -rq "PERHUP" "$XDG_STATE_HOME/iro/swap"'
+start "$F"; keys v; sleep 0.2; keys C-q; sleep 0.3
+ok "File untouched, backups gone" '[ "$(cat "$F")" = "$before" ] && [ -z "$(ls "$XDG_STATE_HOME/iro/swap" 2>/dev/null)" ]'
+
 echo "Ctrl+X without selection cuts the line"
 start "$F"; keys Down; keys Right; keys C-x
 ok "Line gone, next one moves up" '[ "$(screen | sed -n 2p)" = "  2   drei UNGESICHERT" ]'

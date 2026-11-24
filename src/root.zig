@@ -26,6 +26,7 @@ pub const index = @import("index.zig");
 pub const search = @import("search.zig");
 pub const history = @import("history.zig");
 pub const guard = @import("guard.zig");
+pub const signals = @import("signals.zig");
 
 pub const Buffer = buffer.Buffer;
 pub const Pos = buffer.Pos;
@@ -52,6 +53,7 @@ test {
     _ = menu;
     _ = settings;
     _ = index;
+    _ = signals;
     _ = search;
     _ = history;
     _ = guard;

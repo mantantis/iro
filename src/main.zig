@@ -49,6 +49,8 @@ const Event = union(enum) {
     focus_in,
     /// The file index has found something new (comes from a worker thread).
     index_progress,
+    /// SIGTERM or SIGHUP, or the terminal is gone: back up and leave.
+    terminate,
 };
 
 const Loop = vaxis.Loop(Event);
@@ -1198,6 +1200,12 @@ pub const App = struct {
         // Backups from older iro versions were world-readable.
         cwd.setFilePermissions(self.io, swap, fileio.private_file, .{}) catch {};
         d.swapped_rev = rev;
+    }
+
+    /// Brings every recovery file up to date, for leaving without asking.
+    /// Unsaved changes come back as a recovery offer on the next start.
+    fn backupAll(self: *App) void {
+        for (self.docs.items) |doc| self.writeSwap(doc);
     }
 
     fn removeSwap(self: *App, d: *Doc) void {
@@ -3958,6 +3966,17 @@ fn resolvePath(gpa: Allocator, io: Io, arg: []const u8) ![]u8 {
     return std.fs.path.join(gpa, &.{ buf[0..n], arg });
 }
 
+fn notifyTerminate(ctx: *anyopaque) void {
+    const loop: *Loop = @ptrCast(@alignCast(ctx));
+    loop.postEvent(.terminate) catch {};
+}
+
+/// Sends the finished frame to the terminal.
+fn present(vx: *vaxis.Vaxis, writer: *Io.Writer) !void {
+    try vx.render(writer);
+    try writer.flush();
+}
+
 fn colorTicker(loop: *Loop, io: Io) void {
     while (true) {
         io.sleep(.fromSeconds(10), .awake) catch return;
@@ -4256,6 +4275,9 @@ pub fn main(init: std.process.Init) !void {
     try loop.installResizeHandler();
     defer loop.uninstallResizeHandler();
     app.loop = &loop;
+    // Deferred after `loop.stop`, so it ends before the loop does.
+    iro.signals.start(io, .{ .ctx = &loop, .func = notifyTerminate }) catch {};
+    defer iro.signals.stop(io);
     // Deferred after `loop.stop`, so it runs before it.
     defer {
         app.stopIndexes();
@@ -4298,14 +4320,16 @@ pub fn main(init: std.process.Init) !void {
     while (!app.should_quit) {
         armSwapTimer(&app, &swap_timers, &loop, io);
         const event = if (app.isAnimating()) blk: {
-            if (try loop.tryEvent()) |ev| break :blk ev;
+            if (loop.tryEvent() catch @as(?Event, .terminate)) |ev| break :blk ev;
             io.sleep(.fromMilliseconds(16), .awake) catch {};
             app.stepAnimation();
             draw_mod.draw(&app);
-            try vx.render(writer);
-            try writer.flush();
+            present(&vx, writer) catch {
+                app.backupAll();
+                break;
+            };
             continue;
-        } else try loop.nextEvent();
+        } else loop.nextEvent() catch .terminate;
         switch (event) {
             .key_press => |key| app.handleKey(key),
             .mouse => |m| app.handleMouse(m),
@@ -4348,9 +4372,16 @@ pub fn main(init: std.process.Init) !void {
                 continue;
             },
             .focus_in => if (!app.checkAllOutside()) continue,
+            .terminate => {
+                app.backupAll();
+                break;
+            },
         }
         draw_mod.draw(&app);
-        try vx.render(writer);
-        try writer.flush();
+        // A terminal that can no longer be written to is gone.
+        present(&vx, writer) catch {
+            app.backupAll();
+            break;
+        };
     }
 }
