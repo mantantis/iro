@@ -1047,11 +1047,26 @@ pub const App = struct {
         d.read_only = false;
         var dir_buf: [Io.Dir.max_path_bytes]u8 = undefined;
         const state_dir = self.statePath(&dir_buf, "swap") orelse return;
-        const path = std.fmt.allocPrintSentinel(self.gpa, "{s}/{x:0>16}.lock", .{ state_dir, std.hash.Wyhash.hash(0, file) }, 0) catch return;
-        const rc = linux.open(path.ptr, .{ .ACCMODE = .RDWR, .CREAT = true, .CLOEXEC = true }, 0o600);
-        if (linux.errno(rc) != .SUCCESS) return self.gpa.free(path);
-        const fd: linux.fd_t = @intCast(rc);
-        switch (linux.errno(linux.flock(fd, std.posix.LOCK.EX | std.posix.LOCK.NB))) {
+        // The lock belongs to the real file, so a second name for it (a
+        // symlink) finds the same lock.
+        var real_buf: [Io.Dir.max_path_bytes]u8 = undefined;
+        const key = if (Io.Dir.cwd().realPathFile(self.io, file, &real_buf)) |n| real_buf[0..n] else |_| file;
+        const path = std.fmt.allocPrintSentinel(self.gpa, "{s}/{x:0>16}.lock", .{ state_dir, std.hash.Wyhash.hash(0, key) }, 0) catch return;
+        var fd: linux.fd_t = undefined;
+        var result: linux.E = .AGAIN;
+        // The iro letting go removes the lock file before closing it. Whoever
+        // opened it just before may then lock a file that no longer has a
+        // name, while a third iro creates and locks a fresh one. So after
+        // locking, check that the file locked is still the one under the name.
+        for (0..8) |_| {
+            const rc = linux.open(path.ptr, .{ .ACCMODE = .RDWR, .CREAT = true, .CLOEXEC = true }, 0o600);
+            if (linux.errno(rc) != .SUCCESS) return self.gpa.free(path);
+            fd = @intCast(rc);
+            result = linux.errno(linux.flock(fd, std.posix.LOCK.EX | std.posix.LOCK.NB));
+            if (result != .SUCCESS or fileio.sameFile(fd, path.ptr)) break;
+            _ = linux.close(fd);
+        } else return self.gpa.free(path);
+        switch (result) {
             .SUCCESS => {
                 // The PID is only for the message in the other iro.
                 var buf: [16]u8 = undefined;
@@ -1474,9 +1489,14 @@ pub const App = struct {
     /// as it was. From here on `path` belongs to iro.
     fn openPath(self: *App, path: []u8, allow_new: bool) void {
         const gpa = self.gpa;
+        // A symlink and its target are the same file: switch to the tab that
+        // has it, instead of opening it a second time under another name. The
+        // tab keeps the name it was opened under.
+        var real_buf: [Io.Dir.max_path_bytes]u8 = undefined;
+        const real: []const u8 = if (Io.Dir.cwd().realPathFile(self.io, path, &real_buf)) |n| real_buf[0..n] else |_| path;
         for (self.docs.items, 0..) |doc, i| {
             const other = doc.path orelse continue;
-            if (std.mem.eql(u8, other, path)) {
+            if (std.mem.eql(u8, other, path) or self.sameRealPath(other, real)) {
                 gpa.free(path);
                 self.switchTo(i);
                 self.focus = .text;
@@ -1522,6 +1542,13 @@ pub const App = struct {
         self.focus = .text;
         if (!is_new) self.rememberRecent(doc.path.?);
         if (is_new and self.prompt == null and self.msg_len == 0) self.say(false, "Neue Datei", "New file", .{});
+    }
+
+    /// Does `path` lead to the file `real` (an already resolved path)?
+    fn sameRealPath(self: *App, path: []const u8, real: []const u8) bool {
+        var buf: [Io.Dir.max_path_bytes]u8 = undefined;
+        const n = Io.Dir.cwd().realPathFile(self.io, path, &buf) catch return false;
+        return std.mem.eql(u8, buf[0..n], real);
     }
 
     /// Ctrl+W: close the tab, asking first if there are unsaved changes.

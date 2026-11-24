@@ -14,7 +14,8 @@ All notable changes to iro are documented here. The format follows
 - Automatic gear shifting: opening the file tree, a second tab, split view or
   file search in Blade shifts up to Forge (`auto_gear = false` disables it).
 - Local history of earlier file versions: the last 20 per file, Alt+R brings one back.
-- A file already open in another iro opens read-only and names that iro's PID.
+- A file already open in another iro opens read-only and names that iro's PID,
+  also when it is opened through a symlink.
 - Files changed by another program reload when you return to iro, if the tab has
   no unsaved changes. Otherwise iro warns, and the overwrite question can load the
   file from disk instead.

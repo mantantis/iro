@@ -376,6 +376,17 @@ pub fn writeAtomicMode(io: Io, dir: Io.Dir, path: []const u8, bytes: []const u8,
     syncDir(tdir);
 }
 
+/// Is the open file `fd` still the one called `path`? False once the name is
+/// gone or belongs to a different file.
+pub fn sameFile(fd: linux.fd_t, path: [*:0]const u8) bool {
+    var held: linux.Statx = undefined;
+    var named: linux.Statx = undefined;
+    const mask: linux.STATX = .{ .INO = true };
+    if (linux.errno(linux.statx(fd, "", linux.AT.EMPTY_PATH, mask, &held)) != .SUCCESS) return false;
+    if (linux.errno(linux.statx(linux.AT.FDCWD, path, 0, mask, &named)) != .SUCCESS) return false;
+    return held.ino == named.ino and held.dev_major == named.dev_major and held.dev_minor == named.dev_minor;
+}
+
 /// The mode a newly created file usually gets.
 fn defaultFilePermissions() Io.File.Permissions {
     if (@import("builtin").os.tag != .linux) return .default_file;
@@ -823,4 +834,32 @@ test "a symlink loop is reported and left alone" {
     try tmp.dir.symLink(io, "a", "b", .{});
     try testing.expectError(error.SymLinkLoop, writeAtomic(io, tmp.dir, "a", "x\n"));
     try expectLink(tmp.dir, "a", "b");
+}
+
+test "a lock taken on a file that lost its name is noticed" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const io = testing.io;
+    var root_buf: [Io.Dir.max_path_bytes]u8 = undefined;
+    const n = try tmp.dir.realPath(io, &root_buf);
+    var buf: [Io.Dir.max_path_bytes]u8 = undefined;
+    const lock = try std.fmt.bufPrintSentinel(&buf, "{s}/x.lock", .{root_buf[0..n]}, 0);
+    const flags: linux.O = .{ .ACCMODE = .RDWR, .CREAT = true, .CLOEXEC = true };
+
+    // iro A holds the lock; iro B opens the file in the same moment.
+    const a: linux.fd_t = @intCast(linux.open(lock.ptr, flags, 0o600));
+    try testing.expectEqual(linux.E.SUCCESS, linux.errno(linux.flock(a, std.posix.LOCK.EX | std.posix.LOCK.NB)));
+    const b: linux.fd_t = @intCast(linux.open(lock.ptr, flags, 0o600));
+    defer _ = linux.close(b);
+    try testing.expect(sameFile(b, lock.ptr));
+    // A lets go: name first, then the handle. Now B gets its lock...
+    _ = linux.unlink(lock.ptr);
+    _ = linux.close(a);
+    try testing.expectEqual(linux.E.SUCCESS, linux.errno(linux.flock(b, std.posix.LOCK.EX | std.posix.LOCK.NB)));
+    // ...but on a file nobody else can find. iro C creates a fresh one.
+    try testing.expect(!sameFile(b, lock.ptr));
+    const c: linux.fd_t = @intCast(linux.open(lock.ptr, flags, 0o600));
+    defer _ = linux.close(c);
+    try testing.expect(!sameFile(b, lock.ptr));
+    try testing.expect(sameFile(c, lock.ptr));
 }
