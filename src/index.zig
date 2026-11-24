@@ -33,6 +33,11 @@ pub const Options = struct {
     /// Workers. 0: as many as cores, at most 8.
     workers: usize = 0,
     skip_mounts: bool = true,
+    /// Mount points to skip instead of those in /proc/self/mounts (for tests).
+    mounts: ?[]const []const u8 = null,
+    /// Memory for the workers. Must be thread-safe unless `workers` is 1.
+    /// Only tests change it (to simulate running out of memory).
+    backing: Allocator = std.heap.smp_allocator,
 };
 
 /// Called from a worker when there is something new. Must therefore be
@@ -56,7 +61,10 @@ pub fn rankOf(path: []const u8) u32 {
 /// State shared by the workers. Everything behind `mutex` except `cancel`.
 const Shared = struct {
     io: Io,
+    alloc: Allocator,
     root: []const u8,
+    /// `root` without a trailing slash, for joining paths ("/" becomes "").
+    base: []const u8,
     mounts: []const []const u8,
     max_files: usize,
     notify: ?Notify,
@@ -80,8 +88,6 @@ const Shared = struct {
     misc: std.heap.ArenaAllocator,
 };
 
-const alloc = std.heap.smp_allocator;
-
 pub const Index = struct {
     gpa: Allocator,
     io: Io,
@@ -99,25 +105,32 @@ pub const Index = struct {
     /// background. Without concurrency, `start` reads everything itself.
     pub fn start(gpa: Allocator, io: Io, root: []const u8, opts: Options, notify: ?Notify) !*Index {
         const n_workers = if (opts.workers > 0) opts.workers else std.math.clamp(std.Thread.getCpuCount() catch 2, 2, 8);
+        const alloc = opts.backing;
         const sh = try alloc.create(Shared);
         errdefer alloc.destroy(sh);
         const arenas = try alloc.alloc(std.heap.ArenaAllocator, n_workers);
+        errdefer alloc.free(arenas);
         for (arenas) |*a| a.* = .init(alloc);
         sh.* = .{
             .io = io,
+            .alloc = alloc,
             .root = undefined,
+            .base = undefined,
             .mounts = &.{},
             .max_files = opts.max_files,
             .notify = notify,
             .arenas = arenas,
             .misc = .init(alloc),
         };
+        errdefer sh.misc.deinit();
         const misc = sh.misc.allocator();
         sh.root = try misc.dupe(u8, root);
-        if (opts.skip_mounts) sh.mounts = finder.mountPoints(misc, io);
+        sh.base = std.mem.trimEnd(u8, sh.root, "/");
+        if (opts.skip_mounts) sh.mounts = opts.mounts orelse finder.mountPoints(misc, io);
         try sh.queue.append(misc, "");
 
         const self = try gpa.create(Index);
+        errdefer gpa.destroy(self);
         self.* = .{
             .gpa = gpa,
             .io = io,
@@ -153,6 +166,7 @@ pub const Index = struct {
         sh.cond.broadcast(self.io);
         sh.mutex.unlock(self.io);
         self.group.await(self.io) catch {};
+        const alloc = sh.alloc;
         for (sh.arenas) |*a| a.deinit();
         alloc.free(sh.arenas);
         sh.misc.deinit();
@@ -190,6 +204,7 @@ pub const Index = struct {
 
 fn worker(sh: *Shared, w: usize) Io.Cancelable!void {
     const io = sh.io;
+    const alloc = sh.alloc;
     const arena = sh.arenas[w].allocator();
     var files: std.ArrayList(Entry) = .empty;
     defer files.deinit(alloc);
@@ -219,17 +234,23 @@ fn worker(sh: *Shared, w: usize) Io.Cancelable!void {
 
         files.clearRetainingCapacity();
         dirs.clearRetainingCapacity();
-        readDir(sh, arena, rel, &files, &dirs);
+        // Out of memory: keep what was read so far, but the list is incomplete.
+        const complete = if (readDir(sh, arena, alloc, rel, &files, &dirs)) true else |_| false;
 
         sh.mutex.lockUncancelable(io);
+        if (!complete) sh.truncated = true;
         const room = sh.max_files -| sh.total;
         if (files.items.len > room) sh.truncated = true;
         const take = @min(files.items.len, room);
-        sh.inbox.appendSlice(sh.misc.allocator(), files.items[0..take]) catch {};
-        sh.total += take;
+        if (sh.inbox.appendSlice(sh.misc.allocator(), files.items[0..take])) {
+            sh.total += take;
+        } else |_| sh.truncated = true;
         if (sh.total < sh.max_files) {
-            sh.queue.appendSlice(sh.misc.allocator(), dirs.items) catch {};
-            sh.pending += dirs.items.len;
+            // Count only folders that really made it into the queue. Otherwise
+            // `pending` never reaches zero and every worker waits forever.
+            if (sh.queue.appendSlice(sh.misc.allocator(), dirs.items)) {
+                sh.pending += dirs.items.len;
+            } else |_| sh.truncated = true;
         } else if (dirs.items.len > 0) sh.truncated = true;
         sh.pending -= 1;
         if (sh.pending == 0 or dirs.items.len > 0) sh.cond.broadcast(io);
@@ -242,10 +263,17 @@ fn worker(sh: *Shared, w: usize) Io.Cancelable!void {
 }
 
 /// Reads a folder: files into `files`, subfolders into `dirs`.
-fn readDir(sh: *Shared, arena: Allocator, rel: []const u8, files: *std.ArrayList(Entry), dirs: *std.ArrayList([]const u8)) void {
+fn readDir(
+    sh: *Shared,
+    arena: Allocator,
+    alloc: Allocator,
+    rel: []const u8,
+    files: *std.ArrayList(Entry),
+    dirs: *std.ArrayList([]const u8),
+) error{OutOfMemory}!void {
     const io = sh.io;
     var path_buf: [Io.Dir.max_path_bytes]u8 = undefined;
-    const full = if (rel.len == 0) sh.root else std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ sh.root, rel }) catch return;
+    const full = if (rel.len == 0) sh.root else std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ sh.base, rel }) catch return;
     // Folders without read permission or just deleted are skipped.
     var dir = Io.Dir.cwd().openDir(io, full, .{ .iterate = true }) catch return;
     defer dir.close(io);
@@ -265,15 +293,19 @@ fn readDir(sh: *Shared, arena: Allocator, rel: []const u8, files: *std.ArrayList
         };
         if (kind == .directory and finder.isJunk(e.name)) continue;
         if (kind != .directory and kind != .file) continue;
-        const path = (if (rel.len == 0) arena.dupe(u8, e.name) else std.fmt.allocPrint(arena, "{s}/{s}", .{ rel, e.name })) catch return;
+        const path = try (if (rel.len == 0) arena.dupe(u8, e.name) else std.fmt.allocPrint(arena, "{s}/{s}", .{ rel, e.name }));
         if (kind == .directory) {
-            const sub = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ sh.root, path }) catch continue;
-            const is_mount = for (sh.mounts) |m| {
-                if (std.mem.eql(u8, m, sub)) break true;
-            } else false;
-            if (!is_mount) dirs.append(alloc, path) catch return;
-        } else files.append(alloc, .{ .path = path, .rank = rankOf(path) }) catch return;
+            const sub = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ sh.base, path }) catch continue;
+            if (!isMount(sh.mounts, sub)) try dirs.append(alloc, path);
+        } else try files.append(alloc, .{ .path = path, .rank = rankOf(path) });
     }
+}
+
+fn isMount(mounts: []const []const u8, path: []const u8) bool {
+    for (mounts) |m| {
+        if (std.mem.eql(u8, m, path)) return true;
+    }
+    return false;
 }
 
 /// The git root above `dir` (the folder containing `.git`), or `null`.
@@ -345,6 +377,56 @@ test "limit applies and is reported" {
     idx.wait();
     try std.testing.expectEqual(@as(usize, 20), idx.entries.items.len);
     try std.testing.expect(idx.truncated);
+}
+
+test "trailing slash in the root still skips mount points" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.createDirPath(io, "mnt/drive");
+    try tmp.dir.writeFile(io, .{ .sub_path = "mnt/drive/far.txt", .data = "" });
+    try tmp.dir.writeFile(io, .{ .sub_path = "near.txt", .data = "" });
+    var root_buf: [Io.Dir.max_path_bytes]u8 = undefined;
+    const n = try tmp.dir.realPath(io, &root_buf);
+    var buf: [Io.Dir.max_path_bytes]u8 = undefined;
+    const mount = try std.fmt.bufPrint(&buf, "{s}/mnt/drive", .{root_buf[0..n]});
+    root_buf[n] = '/';
+    const idx = try Index.start(gpa, io, root_buf[0 .. n + 1], .{ .mounts = &.{mount} }, null);
+    defer idx.deinit();
+    idx.wait();
+    try std.testing.expectEqual(@as(usize, 1), idx.entries.items.len);
+    try std.testing.expectEqualStrings("near.txt", idx.entries.items[0].path);
+}
+
+test "running out of memory anywhere ends the index instead of hanging" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    // Wide enough that the folder queue has to grow more than once.
+    var name_buf: [64]u8 = undefined;
+    for (0..120) |i| {
+        const d = try std.fmt.bufPrint(&name_buf, "dir{d}/sub", .{i});
+        try tmp.dir.createDirPath(io, d);
+        const f = try std.fmt.bufPrint(&name_buf, "dir{d}/sub/file.txt", .{i});
+        try tmp.dir.writeFile(io, .{ .sub_path = f, .data = "" });
+    }
+    var root_buf: [Io.Dir.max_path_bytes]u8 = undefined;
+    const n = try tmp.dir.realPath(io, &root_buf);
+    // One worker, so the failing allocator is only used by one thread at a time.
+    var fail_at: usize = 0;
+    while (fail_at < 10_000) : (fail_at += 1) {
+        var failing: std.testing.FailingAllocator = .init(gpa, .{ .fail_index = fail_at });
+        const opts: Options = .{ .workers = 1, .mounts = &.{}, .backing = failing.allocator() };
+        const idx = Index.start(gpa, io, root_buf[0..n], opts, null) catch continue;
+        idx.wait();
+        try std.testing.expect(idx.finished);
+        const failed = failing.has_induced_failure;
+        if (failed) try std.testing.expect(idx.truncated) else try std.testing.expectEqual(@as(usize, 120), idx.entries.items.len);
+        idx.deinit();
+        if (!failed) break;
+    } else return error.TestUnexpectedResult;
 }
 
 test "git root is found upwards" {

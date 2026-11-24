@@ -418,16 +418,27 @@ pub const App = struct {
         if (self.tree_target) |t| gpa.free(t);
         if (self.about) |*a| a.deinit(gpa);
         self.chosen.deinit(gpa);
-        for (&self.indexes) |*slot| if (slot.*) |idx| {
-            idx.deinit();
-            slot.* = null;
-        };
-        if (self.refresh) |r| r.deinit();
+        self.stopIndexes();
         for (self.recent.items) |r| gpa.free(r);
         self.recent.deinit(gpa);
         if (self.search_dir) |d| gpa.free(d);
         self.cfg.deinit(gpa);
         self.frame.deinit();
+    }
+
+    /// Stops all file index workers. Runs before the event loop shuts down,
+    /// because the workers report progress into it.
+    fn stopIndexes(self: *App) void {
+        if (self.palette) |*p| {
+            p.idx = null;
+            p.hits_idx = null;
+        }
+        for (&self.indexes) |*slot| if (slot.*) |idx| {
+            idx.deinit();
+            slot.* = null;
+        };
+        if (self.refresh) |r| r.deinit();
+        self.refresh = null;
     }
 
     /// Colour of normal text (for most themes: the terminal's).
@@ -4243,6 +4254,11 @@ pub fn main(init: std.process.Init) !void {
     try loop.installResizeHandler();
     defer loop.uninstallResizeHandler();
     app.loop = &loop;
+    // Deferred after `loop.stop`, so it runs before it.
+    defer {
+        app.stopIndexes();
+        app.loop = null;
+    }
     if (app.start_dir) |d| app.search_dir = gpa.dupe(u8, d) catch null;
     app.loadRecent();
     for (app.docs.items) |doc| if (doc.path) |path| {
