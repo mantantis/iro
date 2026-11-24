@@ -890,11 +890,16 @@ pub const Editor = struct {
             const l = self.buf.line(line);
             var lo: usize = 0;
             var hi: usize = l.len;
+            // What counts is where a match starts. Forward: from the cursor on,
+            // and on the way back round everything that starts before it, even
+            // if it reaches past the cursor (the cursor can sit inside the
+            // only match). Backward the same, mirrored.
+            const reach = @min(l.len, start.col + needle.len - 1);
             if (forward) {
                 if (step == 0) lo = start.col;
-                if (step == n) hi = start.col;
+                if (step == n) hi = reach;
             } else {
-                if (step == 0) hi = start.col;
+                if (step == 0) hi = reach;
                 if (step == n) lo = start.col;
             }
             if (searchLine(l, needle, lo, hi, forward, exact)) |col| {
@@ -1656,4 +1661,38 @@ test "a failed edit keeps earlier typing it would have merged with" {
     once.k = once.n;
     try testing.expectError(error.OutOfMemory, ed.typeText("y"));
     try expectContent(&ed, "ab\nx");
+}
+
+test "search finds a match the cursor sits inside" {
+    var ed = try makeEditor("hello\nworld");
+    defer ed.deinit();
+    const inside: Pos = .{ .line = 0, .col = 2 };
+    const fwd = ed.find("hello", inside, true).?;
+    try testing.expectEqual(Pos{ .line = 0, .col = 0 }, fwd.start);
+    const back = ed.find("hello", inside, false).?;
+    try testing.expectEqual(Pos{ .line = 0, .col = 0 }, back.start);
+    // Backwards from the end of a match finds that match, not one before it.
+    try testing.expectEqual(Pos{ .line = 1, .col = 0 }, ed.find("world", .{ .line = 1, .col = 3 }, false).?.start);
+}
+
+test "searching on from a selected match moves to the next one or stays" {
+    var ed = try makeEditor("ab ab ab");
+    defer ed.deinit();
+    ed.setCursor(.{ .line = 0, .col = 3 }, false);
+    try testing.expect(ed.findAndSelect("ab", true));
+    try testing.expectEqual(Pos{ .line = 0, .col = 3 }, ed.anchor.?);
+    try testing.expect(ed.findAndSelect("ab", true));
+    try testing.expectEqual(Pos{ .line = 0, .col = 6 }, ed.anchor.?);
+    try testing.expect(ed.findAndSelect("ab", true));
+    try testing.expectEqual(Pos{ .line = 0, .col = 0 }, ed.anchor.?);
+    try testing.expect(ed.findAndSelect("ab", false));
+    try testing.expectEqual(Pos{ .line = 0, .col = 6 }, ed.anchor.?);
+    // The only match: stays selected, in both directions.
+    var one = try makeEditor("x only y");
+    defer one.deinit();
+    try testing.expect(one.findAndSelect("only", true));
+    try testing.expect(one.findAndSelect("only", true));
+    try testing.expectEqual(Pos{ .line = 0, .col = 2 }, one.anchor.?);
+    try testing.expect(one.findAndSelect("only", false));
+    try testing.expectEqual(Pos{ .line = 0, .col = 2 }, one.anchor.?);
 }
