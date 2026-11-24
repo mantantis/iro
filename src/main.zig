@@ -3336,9 +3336,11 @@ pub const App = struct {
                 if (letter(key, if (self.lang == .en) 'r' else 'w') or self.yes(key)) {
                     self.closePrompt();
                     if (self.d.recover_text) |t| {
-                        self.d.ed.selectAll();
-                        self.insertPasted(t);
+                        // One undo step that brings back the text from disk with
+                        // nothing selected, so the next key can't replace it all.
+                        self.d.ed.replaceText(t) catch return self.sayOom();
                         self.d.ed.setCursor(.{}, false);
+                        self.d.follow = true;
                         self.gpa.free(t);
                         self.d.recover_text = null;
                         self.say(false, "Wiederhergestellt. Mit {s} übernehmen, mit {s} verwerfen.", "Restored. {s} keeps it, {s} throws it away.", .{ self.cfg.keyLabel(.save), self.cfg.keyLabel(.undo) });

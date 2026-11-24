@@ -77,6 +77,13 @@ keys w; keys C-s; keys C-q; sleep 0.4
 ok "Change is back"        '[ "$(tail -1 "$F")" = "  drei UNGESICHERT" ]'
 ok "Backup cleaned up"       '[ -z "$(ls "$XDG_STATE_HOME/iro/swap" 2>/dev/null)" ]'
 
+echo "Undo after recovery selects nothing"
+start "$F"; keys C-End; lit ' WEG'; sleep 4.5
+pkill -9 -P "$(t list-panes -F '#{pane_pid}')" -x iro; sleep 0.3
+start "$F"; keys w; keys C-z; lit 'Q'
+ok "The next key after undo does not replace the whole file" '[ "$(screen | sed -n 1p)" = "  1 QHallo Welt" ]'
+keys C-q; sleep 0.2; keys v; sleep 0.4
+
 echo "SIGTERM and SIGHUP back up at once and leave cleanly"
 before="$(cat "$F")"
 # Well inside the two seconds before the regular backup.
