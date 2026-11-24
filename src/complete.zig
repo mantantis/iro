@@ -10,6 +10,9 @@ const buffer = @import("buffer.zig");
 const Buffer = buffer.Buffer;
 const Pos = buffer.Pos;
 
+/// Longer words (minified code, base64) are not offered.
+const max_word_len = 256;
+
 pub const Candidate = struct {
     word: []const u8,
     is_keyword: bool,
@@ -91,6 +94,7 @@ pub fn collect(
                 // Skip the word currently being typed under the cursor.
                 if (line_idx == cursor.line and w_start == cur_start and w_end == cur_end) continue;
                 const word = line[w_start..w_end];
+                if (word.len > max_word_len) continue;
                 if (!matchesPrefix(word, prefix, ci)) continue;
                 if (seen.contains(word)) continue;
                 const duped = try arena.dupe(u8, word);
@@ -109,6 +113,18 @@ pub fn collect(
     }
 
     return out.items;
+}
+
+test "collect skips overlong words" {
+    const gpa = std.testing.allocator;
+    var arena_state = std.heap.ArenaAllocator.init(gpa);
+    defer arena_state.deinit();
+    const long: [max_word_len + 1]u8 = @splat('w');
+    var buf = try Buffer.fromBytes(gpa, "w\n" ++ long ++ "\nwort\n");
+    defer buf.deinit();
+    const items = try collect(arena_state.allocator(), &buf, .{ .line = 0, .col = 1 }, "w", &.{}, false, 10);
+    try std.testing.expectEqual(@as(usize, 1), items.len);
+    try std.testing.expectEqualStrings("wort", items[0].word);
 }
 
 test "wordPrefix detects the word before the cursor" {

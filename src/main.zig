@@ -2468,13 +2468,15 @@ pub const App = struct {
         if (same_idx and grown and q_same and !idx.finished) {
             if (p.last_rank) |t| if (t.durationTo(Io.Timestamp.now(self.io, .awake)).toMilliseconds() < 120) return p.shown.items;
         }
-        const narrow = same_idx and !grown and !p.typo and p.hits_query.items.len > 0 and
+        var narrow = same_idx and !grown and !p.typo and p.hits_query.items.len > 0 and
             q.len > p.hits_query.items.len and std.mem.startsWith(u8, q, p.hits_query.items);
         var subset: std.ArrayList(u32) = .empty;
         defer subset.deinit(self.gpa);
         if (narrow) {
-            subset.ensureTotalCapacity(self.gpa, p.hits.items.len) catch {};
-            for (p.hits.items) |h| subset.appendAssumeCapacity(h.index);
+            // Out of memory: rank the whole index instead.
+            if (subset.ensureTotalCapacity(self.gpa, p.hits.items.len)) {
+                for (p.hits.items) |h| subset.appendAssumeCapacity(h.index);
+            } else |_| narrow = false;
         }
         p.typo = iro.search.rank(self.gpa, self.io, entries, .{
             .needle = q,

@@ -566,7 +566,7 @@ fn drawCompletion(self: *App, tw: vaxis.Window, arena: Allocator, cur: CursorXY)
 
     var max_w: u16 = 12;
     for (items) |it| max_w = @max(max_w, tw.gwidth(it.word));
-    const w: u16 = @min(max_w + 6, tw.width);
+    const w: u16 = @min(max_w +| 6, tw.width);
     const max_rows: u16 = @min(@as(u16, @intCast(items.len)), tw.height -| 2);
     if (max_rows == 0 or w < 8) return;
     const h: u16 = max_rows + 2;
