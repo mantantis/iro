@@ -194,6 +194,35 @@ pub const Editor = struct {
         self.redo_stack.clearRetainingCapacity();
     }
 
+    /// Takes back every change after the first `mark` on the undo stack, for
+    /// an edit of several parts that failed halfway (out of memory). The text,
+    /// cursor and selection are then as before the edit. If even that fails,
+    /// the changes stay on the undo stack (Ctrl+Z can still bring the text
+    /// back) and the cursor is at least moved back into the text.
+    fn rollbackTo(self: *Editor, mark: usize) void {
+        while (self.undo_stack.items.len > mark) {
+            const c = self.undo_stack.items[self.undo_stack.items.len - 1];
+            switch (c.kind) {
+                .insert => self.buf.delete(c.start, c.end) catch break,
+                .delete => _ = self.buf.insert(c.start, c.text) catch break,
+            }
+            self.dirty_from = @min(self.dirty_from, c.start.line);
+            self.undo_stack.items.len -= 1;
+            self.gpa.free(c.text);
+            self.cursor = c.cursor_before;
+            self.anchor = c.anchor_before;
+        }
+        self.cursor = self.snapPos(self.cursor);
+        if (self.anchor) |a| self.anchor = self.snapPos(a);
+    }
+
+    /// `p` moved into the text and onto a character boundary.
+    fn snapPos(self: *const Editor, p: Pos) Pos {
+        var c = self.buf.clamp(p);
+        c.col = text.snap(self.buf.line(c.line), c.col);
+        return c;
+    }
+
     fn newGroup(self: *Editor, kind: Merge) u64 {
         if (kind == .none or kind != self.merge) self.group_counter += 1;
         self.merge = kind;
@@ -218,6 +247,8 @@ pub const Editor = struct {
     pub fn replaceText(self: *Editor, txt: []const u8) Error!void {
         if (!std.unicode.utf8ValidateSlice(txt)) return error.InvalidUtf8;
         const group = self.newGroup(.none);
+        const mark = self.undo_stack.items.len;
+        errdefer self.rollbackTo(mark);
         self.goal = null;
         self.anchor = null;
         try self.applyDelete(group, .{}, self.buf.endPos());
@@ -232,6 +263,8 @@ pub const Editor = struct {
     pub fn insertText(self: *Editor, txt: []const u8) Error!void {
         if (!std.unicode.utf8ValidateSlice(txt)) return error.InvalidUtf8;
         const group = self.newGroup(.none);
+        const mark = self.undo_stack.items.len;
+        errdefer self.rollbackTo(mark);
         self.goal = null;
 
         if (std.mem.indexOfScalar(u8, txt, '\r') == null) {
@@ -267,6 +300,8 @@ pub const Editor = struct {
         const kind: Merge = if (text.classOf(txt) == .space) .typing_space else .typing_word;
         const had_selection = self.selection() != null;
         const group = self.newGroup(if (had_selection) .none else kind);
+        const mark = self.undo_stack.items.len;
+        errdefer self.rollbackTo(mark);
         self.goal = null;
         _ = try self.deleteSelection(group);
         self.cursor = try self.applyInsert(group, self.cursor, txt);
@@ -276,6 +311,8 @@ pub const Editor = struct {
     /// Enter: new line with the indentation of the current line.
     pub fn newline(self: *Editor) Error!void {
         const group = self.newGroup(.none);
+        const mark = self.undo_stack.items.len;
+        errdefer self.rollbackTo(mark);
         self.goal = null;
         _ = try self.deleteSelection(group);
 
@@ -298,6 +335,8 @@ pub const Editor = struct {
     /// Tab key: indent to the next tab stop.
     pub fn tab(self: *Editor) Error!void {
         const group = self.newGroup(.none);
+        const mark = self.undo_stack.items.len;
+        errdefer self.rollbackTo(mark);
         self.goal = null;
         _ = try self.deleteSelection(group);
         if (!self.soft_tabs) {
@@ -359,6 +398,8 @@ pub const Editor = struct {
         const span = self.lineSpan();
         const unit = self.indentUnit();
         const group = self.newGroup(.none);
+        const mark = self.undo_stack.items.len;
+        errdefer self.rollbackTo(mark);
         self.goal = null;
         var line = span.first;
         while (line <= span.last) : (line += 1) {
@@ -373,6 +414,8 @@ pub const Editor = struct {
     pub fn dedentLines(self: *Editor) Error!void {
         const span = self.lineSpan();
         const group = self.newGroup(.none);
+        const mark = self.undo_stack.items.len;
+        errdefer self.rollbackTo(mark);
         self.goal = null;
         var line = span.first;
         while (line <= span.last) : (line += 1) {
@@ -396,6 +439,8 @@ pub const Editor = struct {
         if (token.len == 0) return;
         const span = self.lineSpan();
         const group = self.newGroup(.none);
+        const mark = self.undo_stack.items.len;
+        errdefer self.rollbackTo(mark);
         self.goal = null;
 
         // Look first: are all non-empty lines already comments? And how far is
@@ -438,6 +483,8 @@ pub const Editor = struct {
     /// Duplicates the line under the cursor. The cursor moves into the copy.
     pub fn duplicateLine(self: *Editor) Error!void {
         const group = self.newGroup(.none);
+        const mark = self.undo_stack.items.len;
+        errdefer self.rollbackTo(mark);
         self.goal = null;
         const line = self.cursor.line;
         const copy = try std.mem.concat(self.gpa, u8, &.{ "\n", self.buf.line(line) });
@@ -461,6 +508,10 @@ pub const Editor = struct {
         defer self.gpa.free(swapped);
 
         const group = self.newGroup(.none);
+
+        const mark = self.undo_stack.items.len;
+
+        errdefer self.rollbackTo(mark);
         self.goal = null;
         const col = self.cursor.col;
         self.anchor = null;
@@ -484,6 +535,8 @@ pub const Editor = struct {
         const start = self.posLeft(self.cursor);
         if (start.eql(self.cursor)) return;
         const group = self.newGroup(.backspace);
+        const mark = self.undo_stack.items.len;
+        errdefer self.rollbackTo(mark);
         try self.applyDelete(group, start, self.cursor);
         self.cursor = start;
     }
@@ -499,6 +552,8 @@ pub const Editor = struct {
         const end = self.posRight(self.cursor);
         if (end.eql(self.cursor)) return;
         const group = self.newGroup(.delete_forward);
+        const mark = self.undo_stack.items.len;
+        errdefer self.rollbackTo(mark);
         try self.applyDelete(group, self.cursor, end);
     }
 
@@ -506,6 +561,8 @@ pub const Editor = struct {
     pub fn deleteWordBack(self: *Editor) Error!void {
         self.goal = null;
         const group = self.newGroup(.none);
+        const mark = self.undo_stack.items.len;
+        errdefer self.rollbackTo(mark);
         if (try self.deleteSelection(group)) return;
         const start = self.posWordLeft(self.cursor);
         try self.applyDelete(group, start, self.cursor);
@@ -516,6 +573,8 @@ pub const Editor = struct {
     pub fn deleteWordForward(self: *Editor) Error!void {
         self.goal = null;
         const group = self.newGroup(.none);
+        const mark = self.undo_stack.items.len;
+        errdefer self.rollbackTo(mark);
         if (try self.deleteSelection(group)) return;
         try self.applyDelete(group, self.cursor, self.posWordRight(self.cursor));
     }
@@ -931,6 +990,8 @@ pub const Editor = struct {
         if (!std.unicode.utf8ValidateSlice(with)) return error.InvalidUtf8;
         if (std.mem.indexOfAny(u8, with, "\r\n") != null) return error.InvalidUtf8;
         const group = self.newGroup(.none);
+        const mark = self.undo_stack.items.len;
+        errdefer self.rollbackTo(mark);
         self.goal = null;
         const cursor_before = self.cursor;
         var count: usize = 0;
@@ -1445,4 +1506,154 @@ test "replacing the whole text is one step, and undo selects nothing" {
     try expectContent(&ed, "eins\nzwei\ndrei");
     try testing.expect(ed.selection() == null);
     try testing.expectEqual(Pos{ .line = 1, .col = 2 }, ed.cursor);
+}
+
+/// Fails exactly one allocation or resize (the k-th), then works again: a
+/// short squeeze, as out-of-memory usually is in practice.
+const FailOnce = struct {
+    inner: Allocator,
+    k: usize,
+    n: usize = 0,
+    failed: bool = false,
+
+    fn allocator(self: *FailOnce) Allocator {
+        return .{ .ptr = self, .vtable = &.{ .alloc = alloc, .resize = resize, .remap = remap, .free = free } };
+    }
+    fn hit(self: *FailOnce) bool {
+        defer self.n += 1;
+        if (self.n != self.k) return false;
+        self.failed = true;
+        return true;
+    }
+    fn alloc(ctx: *anyopaque, len: usize, a: std.mem.Alignment, ra: usize) ?[*]u8 {
+        const self: *FailOnce = @ptrCast(@alignCast(ctx));
+        return if (self.hit()) null else self.inner.rawAlloc(len, a, ra);
+    }
+    fn resize(ctx: *anyopaque, m: []u8, a: std.mem.Alignment, len: usize, ra: usize) bool {
+        const self: *FailOnce = @ptrCast(@alignCast(ctx));
+        return if (len > m.len and self.hit()) false else self.inner.rawResize(m, a, len, ra);
+    }
+    fn remap(ctx: *anyopaque, m: []u8, a: std.mem.Alignment, len: usize, ra: usize) ?[*]u8 {
+        const self: *FailOnce = @ptrCast(@alignCast(ctx));
+        return if (len > m.len and self.hit()) null else self.inner.rawRemap(m, a, len, ra);
+    }
+    fn free(ctx: *anyopaque, m: []u8, a: std.mem.Alignment, ra: usize) void {
+        const self: *FailOnce = @ptrCast(@alignCast(ctx));
+        self.inner.rawFree(m, a, ra);
+    }
+};
+
+/// Runs `op` on a fresh editor with `start` as text and lets the k-th
+/// memory request fail, for every k until `op` gets through.
+/// A short squeeze (one request fails): afterwards the text, cursor,
+/// selection and undo state are exactly as before.
+/// Memory gone for good (every request from the k-th on fails): no crash, a
+/// valid cursor, and once memory is back a single undo restores the text.
+fn expectAllOrNothing(start: []const u8, prepare: *const fn (*Editor) anyerror!void, op: *const fn (*Editor) anyerror!void) !void {
+    var k: usize = 0;
+    while (k < 2000) : (k += 1) {
+        var once: FailOnce = .{ .inner = testing.allocator, .k = std.math.maxInt(usize) };
+        const gpa = once.allocator();
+        var ed = Editor.fromBuffer(gpa, try Buffer.fromBytes(gpa, start));
+        defer ed.deinit();
+        try prepare(&ed);
+        const cursor = ed.cursor;
+        const anchor = ed.anchor;
+        const depth = ed.undo_stack.items.len;
+        const modified = ed.isModified();
+        once.k = once.n + k;
+        op(&ed) catch |err| {
+            try testing.expectEqual(error.OutOfMemory, err);
+            try expectContent(&ed, start);
+            try testing.expectEqual(cursor, ed.cursor);
+            try testing.expectEqual(anchor, ed.anchor);
+            try testing.expectEqual(depth, ed.undo_stack.items.len);
+            try testing.expectEqual(modified, ed.isModified());
+            continue;
+        };
+        if (!once.failed) break;
+        // The failed request was one the edit could do without.
+    } else return error.TestUnexpectedResult;
+
+    k = 0;
+    while (k < 2000) : (k += 1) {
+        var failing: std.testing.FailingAllocator = .init(testing.allocator, .{});
+        const gpa = failing.allocator();
+        var ed = Editor.fromBuffer(gpa, try Buffer.fromBytes(gpa, start));
+        defer ed.deinit();
+        try prepare(&ed);
+        const depth = ed.undo_stack.items.len;
+        failing.fail_index = failing.alloc_index + k;
+        failing.resize_fail_index = failing.resize_index + k;
+        op(&ed) catch {
+            failing.fail_index = std.math.maxInt(usize);
+            failing.resize_fail_index = std.math.maxInt(usize);
+            try ed.buf.checkInvariants();
+            try expectCursorValid(&ed);
+            if (ed.undo_stack.items.len > depth) _ = try ed.undo();
+            try testing.expectEqual(depth, ed.undo_stack.items.len);
+            try expectContent(&ed, start);
+            continue;
+        };
+        break;
+    } else return error.TestUnexpectedResult;
+}
+
+fn noPrep(_: *Editor) anyerror!void {}
+fn prepSecondLine(ed: *Editor) anyerror!void {
+    ed.setCursor(.{ .line = 1, .col = 2 }, false);
+}
+fn prepSelectAcross(ed: *Editor) anyerror!void {
+    ed.setCursor(.{ .line = 0, .col = 2 }, false);
+    ed.setCursor(.{ .line = 2, .col = 1 }, true);
+}
+fn prepTyped(ed: *Editor) anyerror!void {
+    // Earlier typing merges with what comes next; a failure must not take it back.
+    ed.setCursor(.{ .line = 2, .col = 0 }, false);
+    try ed.typeText("x");
+}
+
+test "multi-part edits are all or nothing when memory runs out" {
+    const start = "eins\nzwei äöü\ndrei\nvier";
+    try expectAllOrNothing(start, noPrep, struct {
+        fn f(ed: *Editor) anyerror!void {
+            try ed.replaceText("ganz\nneuer\ntext\n");
+        }
+    }.f);
+    try expectAllOrNothing(start, prepSecondLine, struct {
+        fn f(ed: *Editor) anyerror!void {
+            _ = try ed.moveLine(true);
+        }
+    }.f);
+    try expectAllOrNothing(start, noPrep, struct {
+        fn f(ed: *Editor) anyerror!void {
+            _ = try ed.replaceFrom("e", "EEE", .{});
+        }
+    }.f);
+    try expectAllOrNothing(start, prepSelectAcross, struct {
+        fn f(ed: *Editor) anyerror!void {
+            try ed.insertText("ein\r\nlanger\r\neinschub");
+        }
+    }.f);
+    try expectAllOrNothing(start, prepSelectAcross, struct {
+        fn f(ed: *Editor) anyerror!void {
+            try ed.toggleComment("//");
+        }
+    }.f);
+    try expectAllOrNothing(start, prepSelectAcross, struct {
+        fn f(ed: *Editor) anyerror!void {
+            try ed.tab();
+        }
+    }.f);
+}
+
+test "a failed edit keeps earlier typing it would have merged with" {
+    var once: FailOnce = .{ .inner = testing.allocator, .k = std.math.maxInt(usize) };
+    const gpa = once.allocator();
+    var ed = Editor.fromBuffer(gpa, try Buffer.fromBytes(gpa, "ab\n"));
+    defer ed.deinit();
+    try prepTyped(&ed);
+    once.k = once.n;
+    try testing.expectError(error.OutOfMemory, ed.typeText("y"));
+    try expectContent(&ed, "ab\nx");
 }
