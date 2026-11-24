@@ -156,16 +156,112 @@ pub fn runBounded(
     stderr_limit: Io.Limit,
     timeout_ms: i64,
 ) std.process.RunError!std.process.RunResult {
-    const timeout: Io.Timeout = .{ .duration = .{
+    // Like `std.process.run`, which in Zig 0.17 only sends SIGTERM on timeout
+    // and then waits without limit for the child to exit, and also waits
+    // without limit once the child has closed its output. Here the deadline
+    // covers everything, and a helper that overstays it is killed with its
+    // whole process group (`git` and `gio` start helpers of their own).
+    const deadline = (Io.Timeout{ .duration = .{
         .clock = .awake,
         .raw = .fromMilliseconds(timeout_ms),
-    } };
-    return std.process.run(gpa, io, .{
+    } }).toDeadline(io);
+    reapAbandoned();
+    var child = try std.process.spawn(io, .{
         .argv = argv,
-        .stdout_limit = stdout_limit,
-        .stderr_limit = stderr_limit,
-        .timeout = timeout.toDeadline(io),
+        .stdin = .ignore,
+        .stdout = .pipe,
+        .stderr = .pipe,
+        .pgid = 0,
     });
+    var done = false;
+    defer if (!done) killHard(io, &child);
+
+    var multi_reader_buffer: Io.File.MultiReader.Buffer(2) = undefined;
+    var multi_reader: Io.File.MultiReader = undefined;
+    multi_reader.init(gpa, io, multi_reader_buffer.toStreams(), &.{ child.stdout.?, child.stderr.? });
+    defer multi_reader.deinit();
+    const stdout_reader = multi_reader.reader(0);
+    const stderr_reader = multi_reader.reader(1);
+    while (multi_reader.fill(64, deadline)) |_| {
+        if (stdout_limit.toInt()) |limit| if (stdout_reader.buffered().len > limit) return error.StreamTooLong;
+        if (stderr_limit.toInt()) |limit| if (stderr_reader.buffered().len > limit) return error.StreamTooLong;
+    } else |err| switch (err) {
+        error.EndOfStream => {},
+        else => |e| return e,
+    }
+    try multi_reader.checkAnyError();
+
+    const term = try waitUntil(io, &child, deadline);
+    done = true;
+    const stdout_slice = try multi_reader.toOwnedSlice(0);
+    errdefer gpa.free(stdout_slice);
+    const stderr_slice = try multi_reader.toOwnedSlice(1);
+    return .{ .stdout = stdout_slice, .stderr = stderr_slice, .term = term };
+}
+
+/// Waits for the child to exit, but not past `deadline`.
+fn waitUntil(io: Io, child: *std.process.Child, deadline: Io.Timeout) Io.Timeout.Error!std.process.Child.Term {
+    const pid = child.id.?;
+    const end = deadline.toTimestamp(io).?;
+    var pause_ms: i64 = 1;
+    while (true) {
+        var status: c_int = 0;
+        const got = std.c.wait4(pid, &status, std.posix.W.NOHANG, null);
+        if (got == pid) {
+            releaseChild(io, child);
+            return std.Io.Threaded.statusToTerm(@bitCast(status));
+        }
+        if (got < 0 and std.posix.errno(got) != .INTR) {
+            // Already reaped elsewhere: nothing left to wait for.
+            releaseChild(io, child);
+            return .{ .unknown = 0 };
+        }
+        if (Io.Timestamp.now(io, .awake).durationTo(end.raw).toMilliseconds() <= 0) return error.Timeout;
+        io.sleep(.fromMilliseconds(pause_ms), .awake) catch return error.Timeout;
+        pause_ms = @min(pause_ms * 2, 20);
+    }
+}
+
+/// Closes the pipes and forgets the child, so `Child` holds nothing anymore.
+fn releaseChild(io: Io, child: *std.process.Child) void {
+    if (child.stdout) |f| f.close(io);
+    if (child.stderr) |f| f.close(io);
+    child.stdout = null;
+    child.stderr = null;
+    child.id = null;
+}
+
+/// Children killed but not yet gone (stuck in the kernel, for example on a
+/// dead network mount). They are reaped later instead of being waited for.
+var abandoned: [16]std.posix.pid_t = @splat(0);
+
+fn killHard(io: Io, child: *std.process.Child) void {
+    const pid = child.id orelse return;
+    // The whole group first, then the child itself in case it left the group.
+    _ = std.c.kill(-pid, std.posix.SIG.KILL);
+    _ = std.c.kill(pid, std.posix.SIG.KILL);
+    // SIGKILL usually takes effect at once; a process stuck in the kernel only
+    // dies when the kernel lets go. Wait briefly, never indefinitely.
+    var tries: usize = 0;
+    while (tries < 20) : (tries += 1) {
+        var status: c_int = 0;
+        if (std.c.wait4(pid, &status, std.posix.W.NOHANG, null) != 0) break;
+        io.sleep(.fromMilliseconds(5), .awake) catch break;
+    } else for (&abandoned) |*slot| {
+        if (slot.* == 0) {
+            slot.* = pid;
+            break;
+        }
+    }
+    releaseChild(io, child);
+}
+
+fn reapAbandoned() void {
+    for (&abandoned) |*slot| {
+        if (slot.* == 0) continue;
+        var status: c_int = 0;
+        if (std.c.wait4(slot.*, &status, std.posix.W.NOHANG, null) != 0) slot.* = 0;
+    }
 }
 
 /// Has another program changed the file since the last load or save?
@@ -608,4 +704,47 @@ test "hung helper program times out and is killed" {
             40,
         ),
     );
+}
+
+test "helper output and exit status come back" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    const r = try runBounded(gpa, io, &.{ "sh", "-c", "echo hi; echo oops >&2; exit 3" }, .limited(1024), .limited(1024), 2000);
+    defer gpa.free(r.stdout);
+    defer gpa.free(r.stderr);
+    try std.testing.expectEqualStrings("hi\n", r.stdout);
+    try std.testing.expectEqualStrings("oops\n", r.stderr);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 3 }, r.term);
+}
+
+fn expectTimeoutWithin(argv: []const []const u8, max_ms: i64) !void {
+    const io = std.testing.io;
+    const t0 = Io.Timestamp.now(io, .awake);
+    try std.testing.expectError(error.Timeout, runBounded(std.testing.allocator, io, argv, .limited(1024), .limited(1024), 300));
+    try std.testing.expect(t0.durationTo(Io.Timestamp.now(io, .awake)).toMilliseconds() < max_ms);
+}
+
+test "a helper that ignores SIGTERM cannot outlast the deadline" {
+    try expectTimeoutWithin(&.{ "sh", "-c", "trap '' TERM; sleep 30" }, 2000);
+}
+
+test "a helper that closes its output but keeps running cannot outlast the deadline" {
+    try expectTimeoutWithin(&.{ "sh", "-c", "exec >&- 2>&-; sleep 30" }, 2000);
+}
+
+test "a timed-out helper takes its own children with it" {
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var root_buf: [Io.Dir.max_path_bytes]u8 = undefined;
+    const n = try tmp.dir.realPath(io, &root_buf);
+    var buf: [Io.Dir.max_path_bytes + 64]u8 = undefined;
+    const script = try std.fmt.bufPrint(&buf, "sleep 30 & echo $! > {s}/pid; wait", .{root_buf[0..n]});
+    try expectTimeoutWithin(&.{ "sh", "-c", script }, 2000);
+    var pid_buf: [32]u8 = undefined;
+    const raw = try tmp.dir.readFile(io, "pid", &pid_buf);
+    const pid = try std.fmt.parseInt(std.posix.pid_t, std.mem.trim(u8, raw, " \n"), 10);
+    io.sleep(.fromMilliseconds(100), .awake) catch {};
+    // Signal 0 only asks whether the process still exists.
+    try std.testing.expect(std.c.kill(pid, @enumFromInt(0)) != 0);
 }
