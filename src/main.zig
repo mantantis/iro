@@ -3416,12 +3416,12 @@ pub const App = struct {
                         return self.say(true, "Ungültiger Pfad", "Invalid path", .{});
                     for (self.docs.items) |doc| {
                         const other = doc.path orelse continue;
-                        if (doc != self.d and std.mem.eql(u8, other, resolved)) {
+                        if (doc != self.d and samePath(self.io, other, resolved)) {
                             self.gpa.free(resolved);
                             return self.say(true, "Diese Datei ist schon in einem anderen Tab offen", "This file is already open in another tab", .{});
                         }
                     }
-                    const same = if (self.d.path) |old| std.mem.eql(u8, old, resolved) else false;
+                    const same = if (self.d.path) |old| samePath(self.io, old, resolved) else false;
                     if (same) {
                         self.gpa.free(resolved);
                         self.closePrompt();
@@ -3984,13 +3984,34 @@ pub const App = struct {
 };
 
 /// Turns a path argument into a full path, even if the file doesn't exist yet.
+/// `arg` as an absolute path under the name it was given: a symlink stays a
+/// symlink, so the tab shows its name and Config Guard sees the usual path
+/// (the same as files opened with Ctrl+O or from the tree). Only a path with
+/// ".." is resolved for real, because to the kernel "link/../x" is a
+/// different file than it looks like on paper.
 fn resolvePath(gpa: Allocator, io: Io, arg: []const u8) ![]u8 {
     const cwd = Io.Dir.cwd();
     var buf: [Io.Dir.max_path_bytes]u8 = undefined;
-    if (cwd.realPathFile(io, arg, &buf)) |n| return gpa.dupe(u8, buf[0..n]) else |_| {}
-    if (std.fs.path.isAbsolute(arg)) return gpa.dupe(u8, arg);
+    var parts = std.mem.tokenizeScalar(u8, arg, '/');
+    const up = while (parts.next()) |part| {
+        if (std.mem.eql(u8, part, "..")) break true;
+    } else false;
+    if (up) if (cwd.realPathFile(io, arg, &buf)) |n| return gpa.dupe(u8, buf[0..n]) else |_| {};
+    if (std.fs.path.isAbsolute(arg)) return std.fs.path.resolveAlloc(gpa, &.{arg});
     const n = try cwd.realPath(io, &buf);
-    return std.fs.path.join(gpa, &.{ buf[0..n], arg });
+    return std.fs.path.resolveAlloc(gpa, &.{ buf[0..n], arg });
+}
+
+/// Do `a` and `b` lead to the same file (the same name, or a symlink and its
+/// target)?
+fn samePath(io: Io, a: []const u8, b: []const u8) bool {
+    if (std.mem.eql(u8, a, b)) return true;
+    var buf_a: [Io.Dir.max_path_bytes]u8 = undefined;
+    var buf_b: [Io.Dir.max_path_bytes]u8 = undefined;
+    const cwd = Io.Dir.cwd();
+    const na = cwd.realPathFile(io, a, &buf_a) catch return false;
+    const nb = cwd.realPathFile(io, b, &buf_b) catch return false;
+    return std.mem.eql(u8, buf_a[0..na], buf_b[0..nb]);
 }
 
 fn notifyTerminate(ctx: *anyopaque) void {
@@ -4212,7 +4233,7 @@ pub fn main(init: std.process.Init) !void {
         const path = try resolvePath(gpa, io, arg);
         var twice = false;
         for (docs.items) |doc| {
-            if (std.mem.eql(u8, doc.path.?, path)) twice = true;
+            if (samePath(io, doc.path.?, path)) twice = true;
         }
         if (twice) {
             gpa.free(path);

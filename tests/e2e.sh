@@ -93,6 +93,18 @@ ok "SIGHUP backed up the last change" 'grep -rq "PERHUP" "$XDG_STATE_HOME/iro/sw
 start "$F"; keys v; sleep 0.2; keys C-q; sleep 0.3
 ok "File untouched, backups gone" '[ "$(cat "$F")" = "$before" ] && [ -z "$(ls "$XDG_STATE_HOME/iro/swap" 2>/dev/null)" ]'
 
+echo "Symlinks keep their name"
+mkdir -p "$E/repo"; printf 'inhalt\n' > "$E/repo/echt.conf"; ln -s "$E/repo/echt.conf" "$E/link.conf"
+start "$E/link.conf"
+ok "Tab shows the name of the link" 'screen | tail -1 | grep -q "link.conf" && ! screen | tail -1 | grep -q "echt.conf"'
+keys End; lit ' neu'; keys C-s; sleep 0.3; keys C-q; sleep 0.3
+ok "Saving writes through the link" '[ -L "$E/link.conf" ] && [ "$(cat "$E/repo/echt.conf")" = "inhalt neu" ]'
+t kill-server 2>/dev/null; sleep 0.4
+t new-session -d -x 90 -y 10 "env XDG_STATE_HOME='$XDG_STATE_HOME' XDG_CONFIG_HOME='$XDG_CONFIG_HOME' '$IRO' '$E/link.conf' '$E/repo/echt.conf'; sleep 60"; sleep 2.2
+# With two tabs, the first line would be the tab bar.
+ok "Link and target on the command line give one tab" '[ "$(screen | sed -n 1p)" = "  1 inhalt neu" ]'
+keys C-q; sleep 0.3
+
 echo "Ctrl+X without selection cuts the line"
 start "$F"; keys Down; keys Right; keys C-x
 ok "Line gone, next one moves up" '[ "$(screen | sed -n 2p)" = "  2   drei UNGESICHERT" ]'

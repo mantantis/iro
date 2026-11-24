@@ -24,6 +24,9 @@ All notable changes to iro are documented here. The format follows
   offers to recover them.
 
 ### Changed
+- A file opened through a symlink keeps the link's name in the tab and title,
+  wherever it was opened from. Lock and "already open" checks still treat link
+  and target as one file.
 - Command palette, file search, version history and word completion now share
   the same card styling (tinted background, title bar, accent selection marker
   and mouse hover) as the main menu and settings page.
