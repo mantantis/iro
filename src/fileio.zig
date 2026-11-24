@@ -294,16 +294,21 @@ pub fn writeAtomicMode(io: Io, dir: Io.Dir, path: []const u8, bytes: []const u8,
     // If the target is a symlink (common with dotfiles), write to the real file
     // behind it. Otherwise the link would be replaced by a regular file.
     var real_buf: [Io.Dir.max_path_bytes]u8 = undefined;
-    const target: []const u8 = if (dir.realPathFile(io, path, &real_buf)) |n| real_buf[0..n] else |_| path;
+    const target = try linkTarget(io, dir, path, &real_buf);
 
     const dir_path = std.fs.path.dirname(target) orelse ".";
     const base = std.fs.path.basename(target);
     const old_stat: ?Io.File.Stat = dir.statFile(io, target, .{}) catch null;
     const target_z = std.posix.toPosixPath(target) catch return writeInPlace(io, dir, target, bytes, fresh);
     const old_owner: ?Owner = if (old_stat != null) ownerOf(dir.handle, &target_z, 0) else null;
-    // A second name for the same file (hard link) would keep the old content
-    // if the file were replaced.
-    if (old_owner) |o| if (o.nlink > 1) return writeInPlace(io, dir, target, bytes, fresh);
+    if (old_stat != null) {
+        // Without owner and link count it is unknown whether replacing the file
+        // keeps them, so write into it instead.
+        const o = old_owner orelse return writeInPlace(io, dir, target, bytes, fresh);
+        // A second name for the same file (hard link) would keep the old content
+        // if the file were replaced.
+        if (o.nlink > 1) return writeInPlace(io, dir, target, bytes, fresh);
+    }
 
     // The temporary file gets its mode at creation, not after writing.
     // Otherwise the content of a protected file would briefly be readable by
@@ -350,11 +355,12 @@ pub fn writeAtomicMode(io: Io, dir: Io.Dir, path: []const u8, bytes: []const u8,
     const owner_kept = if (old_owner) |o| keepOwner(file.handle, o) else true;
     // The new file gets the same mode as the old one. New files get what the
     // shell would give them (default minus umask).
-    if (owner_kept) file.setPermissions(io, wanted orelse defaultFilePermissions()) catch {};
-    if (!owner_kept or (old_stat != null and !copyXattrs(&target_z, file.handle))) {
+    const mode_kept = owner_kept and if (file.setPermissions(io, wanted orelse defaultFilePermissions())) true else |_| false;
+    if (!mode_kept or (old_stat != null and !copyXattrs(io, dir, target, file.handle))) {
         // The new file cannot look like the old one (someone else's file, a
-        // group we are not in, an attribute only root may set). Replacing it
-        // would quietly change who may read it, so write into it instead.
+        // group we are not in, a mode or attribute that cannot be set).
+        // Replacing it would quietly change who may read or run it, so write
+        // into it instead.
         file.close(io);
         file_open = false;
         tdir.deleteFile(io, tmp_name) catch {};
@@ -398,11 +404,48 @@ fn keepOwner(fd: linux.fd_t, want: Owner) bool {
     return linux.errno(linux.fchown(fd, want.uid, want.gid)) == .SUCCESS;
 }
 
-/// Copies all extended attributes (POSIX ACLs live there too) from `src` to
-/// the new file. Returns false if one cannot be copied.
-fn copyXattrs(src: [*:0]const u8, dst: linux.fd_t) bool {
+/// The file `path` (relative to `dir`) really means: symlinks followed, even
+/// when the last one points to a file that does not exist yet. Then the file
+/// is created behind the link instead of the link being replaced.
+fn linkTarget(io: Io, dir: Io.Dir, path: []const u8, out: *[Io.Dir.max_path_bytes]u8) ![]const u8 {
+    if (dir.realPathFile(io, path, out)) |n| return out[0..n] else |_| {}
+    var cur_buf: [Io.Dir.max_path_bytes]u8 = undefined;
+    var link_buf: [Io.Dir.max_path_bytes]u8 = undefined;
+    if (path.len > cur_buf.len) return error.NameTooLong;
+    @memcpy(cur_buf[0..path.len], path);
+    var cur: []const u8 = cur_buf[0..path.len];
+    // The same limit as the kernel's.
+    for (0..40) |_| {
+        const n = dir.readLink(io, cur, &link_buf) catch |err| switch (err) {
+            // Not a link (or not there at all): this is the file.
+            error.NotLink, error.FileNotFound => {
+                @memcpy(out[0..cur.len], cur);
+                return out[0..cur.len];
+            },
+            else => return err,
+        };
+        const dest = link_buf[0..n];
+        const next = if (std.fs.path.isAbsolute(dest) or std.fs.path.dirname(cur) == null)
+            dest
+        else
+            std.fmt.bufPrint(out, "{s}/{s}", .{ std.fs.path.dirname(cur).?, dest }) catch return error.NameTooLong;
+        if (next.len > cur_buf.len) return error.NameTooLong;
+        @memmove(cur_buf[0..next.len], next);
+        cur = cur_buf[0..next.len];
+    }
+    return error.SymLinkLoop;
+}
+
+/// Copies all extended attributes (POSIX ACLs live there too) from the old
+/// file to the new one. Returns false if one cannot be copied.
+fn copyXattrs(io: Io, dir: Io.Dir, path: []const u8, dst: linux.fd_t) bool {
+    // Through a handle, so the path counts relative to `dir` and not to the
+    // working directory.
+    const src_file = dir.openFile(io, path, .{}) catch return false;
+    defer src_file.close(io);
+    const src = src_file.handle;
     var names: [64 * 1024]u8 = undefined;
-    const len = linux.listxattr(src, &names, names.len);
+    const len = linux.flistxattr(src, &names, names.len);
     switch (linux.errno(len)) {
         .SUCCESS => {},
         .OPNOTSUPP => return true, // the file system has none
@@ -416,7 +459,7 @@ fn copyXattrs(src: [*:0]const u8, dst: linux.fd_t) bool {
         i += name_len + 1;
         if (name_len == 0) continue;
         var value: [64 * 1024]u8 = undefined;
-        const value_len = linux.getxattr(src, name, &value, value.len);
+        const value_len = linux.fgetxattr(src, name, &value, value.len);
         if (linux.errno(value_len) != .SUCCESS) return false;
         if (linux.errno(linux.fsetxattr(dst, name, &value, value_len, 0)) != .SUCCESS) return false;
     }
@@ -747,4 +790,37 @@ test "a timed-out helper takes its own children with it" {
     io.sleep(.fromMilliseconds(100), .awake) catch {};
     // Signal 0 only asks whether the process still exists.
     try std.testing.expect(std.c.kill(pid, @enumFromInt(0)) != 0);
+}
+
+fn expectLink(dir: Io.Dir, name: []const u8, dest: []const u8) !void {
+    var buf: [Io.Dir.max_path_bytes]u8 = undefined;
+    const n = try dir.readLink(testing.io, name, &buf);
+    try testing.expectEqualStrings(dest, buf[0..n]);
+}
+
+test "saving through a dangling symlink creates the file and keeps the link" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const io = testing.io;
+    try tmp.dir.createDirPath(io, "dotfiles");
+    try tmp.dir.symLink(io, "real.conf", "near.conf", .{});
+    try tmp.dir.symLink(io, "dotfiles/far.conf", "far.conf", .{});
+
+    try writeAtomic(io, tmp.dir, "near.conf", "near\n");
+    try writeAtomic(io, tmp.dir, "far.conf", "far\n");
+    try expectLink(tmp.dir, "near.conf", "real.conf");
+    try expectLink(tmp.dir, "far.conf", "dotfiles/far.conf");
+    var buf: [16]u8 = undefined;
+    try testing.expectEqualStrings("near\n", try tmp.dir.readFile(io, "real.conf", &buf));
+    try testing.expectEqualStrings("far\n", try tmp.dir.readFile(io, "dotfiles/far.conf", &buf));
+}
+
+test "a symlink loop is reported and left alone" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const io = testing.io;
+    try tmp.dir.symLink(io, "b", "a", .{});
+    try tmp.dir.symLink(io, "a", "b", .{});
+    try testing.expectError(error.SymLinkLoop, writeAtomic(io, tmp.dir, "a", "x\n"));
+    try expectLink(tmp.dir, "a", "b");
 }

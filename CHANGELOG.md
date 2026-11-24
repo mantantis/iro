@@ -26,7 +26,8 @@ All notable changes to iro are documented here. The format follows
 - Command palette, file search, version history and word completion now share
   the same card styling (tinted background, title bar, accent selection marker
   and mouse hover) as the main menu and settings page.
-- Saving keeps owner, group, ACLs and hard links intact.
+- Saving keeps owner, group, mode, ACLs, hard links and symlinks intact, even a
+  symlink to a file that does not exist yet.
 - iro only wakes up when there is work to do.
 - External helpers (`git`, `wl-paste`, `gio`, `zoxide`) time out after two
   seconds so a stuck clipboard or dead mount cannot freeze iro.
