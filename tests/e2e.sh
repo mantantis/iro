@@ -726,6 +726,20 @@ keys C-w; sleep 0.3
 ok "Other side keeps its tab after closing"  'screen | grep -q "inhalt-b" && ! screen | grep -q "inhalt-c"'
 keys C-q; sleep 0.3
 
+echo "Startup keeps the gear from the command line and its warnings"
+mkdir -p "$E/ordner"; echo x > "$E/ordner/datei.txt"
+t kill-server 2>/dev/null; sleep 0.4
+t new-session -d -x 100 -y 12 "env XDG_STATE_HOME='$XDG_STATE_HOME' XDG_CONFIG_HOME='$XDG_CONFIG_HOME' '$IRO' --blade '$E/ordner'; sleep 60"
+sleep 2.2
+ok "--blade on a folder stays in Blade"      'screen | tail -1 | grep -q "BLADE" && screen | grep -q "datei.txt"'
+keys C-q; sleep 0.3
+
+mkdir -p "$XDG_CONFIG_HOME/iro"; printf 'tasten = { kaputt\n' > "$XDG_CONFIG_HOME/iro/init.lua"
+start "$E/ordner"
+ok "Folder at start keeps the init.lua error" 'screen | tail -1 | grep -q "init.lua:"'
+keys C-q; sleep 0.3
+rm -f "$XDG_CONFIG_HOME/iro/init.lua"
+
 echo "Very long lines (minified JSON)"
 { printf '{"blob":"'; head -c 200000 /dev/zero | tr '\0' 'a'; printf '"}\n'; } > "$E/long.json"
 start "$E/long.json"

@@ -321,6 +321,8 @@ pub const App = struct {
     start_dir: ?[]u8 = null,
     /// Blade (text only) or Forge (tree, minimap, git). Alt+G switches.
     gear: config.Gear = .forge,
+    /// Startup with a gear from the command line: nothing shifts it yet.
+    gear_held: bool = false,
     /// UI language, and the system's for `language = "auto"`.
     lang: Lang = .de,
     sys_lang: Lang = .de,
@@ -1698,7 +1700,7 @@ pub const App = struct {
     /// split view, file search) is used in Blade, iro shifts up to Forge on its
     /// own. It never shifts down automatically.
     fn upshiftToForge(self: *App) bool {
-        if (self.gear == .forge or !self.cfg.auto_gear) return false;
+        if (self.gear == .forge or !self.cfg.auto_gear or self.gear_held) return false;
         self.gear = .forge;
         self.minimap_forced = false;
         for (self.docs.items) |doc| {
@@ -1718,6 +1720,13 @@ pub const App = struct {
     /// Ctrl+B: show the tree and jump into it. Already inside: hide the tree.
     fn toggleTree(self: *App) void {
         self.msg_len = 0;
+        self.flipTree();
+    }
+
+    /// `toggleTree` without clearing the status line. At startup it may hold
+    /// a warning that has to be seen (init.lua error, file open in another
+    /// iro, restored text).
+    fn flipTree(self: *App) void {
         if (self.tree_visible and self.focus == .tree) {
             self.tree_visible = false;
             self.tree_anim_w = 0;
@@ -4373,6 +4382,9 @@ pub fn main(init: std.process.Init) !void {
     app.loadConfig(false);
     // Command line beats config, config beats "auto". Auto: single file → Blade.
     app.gear = cli_gear orelse app.cfg.gear orelse autoGear(file_args.items.len, start_dir != null);
+    // A gear asked for on the command line holds through startup: the tree
+    // for a folder or restored tabs do not shift it. Later actions may.
+    app.gear_held = cli_gear != null;
     for (app.docs.items) |doc| {
         app.d = doc;
         app.initSwapPath() catch {};
@@ -4396,11 +4408,12 @@ pub fn main(init: std.process.Init) !void {
     }
     if (first_is_new and app.prompt == null and app.msg_len == 0) app.say(false, "Neue Datei", "New file", .{});
     if (start_dir != null) {
-        app.toggleTree();
+        app.flipTree();
     } else if (app.cfg.tree_on_start and app.gear == .forge) {
-        app.toggleTree();
+        app.flipTree();
         app.focus = .text;
     }
+    app.gear_held = false;
 
     var loop: Loop = .init(io, &tty, &vx);
     try loop.start();
