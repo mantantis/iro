@@ -605,20 +605,18 @@ pub const Editor = struct {
         const txt = try self.lineText(gpa);
         errdefer gpa.free(txt);
 
-        if (line + 1 < count) {
-            self.anchor = .{ .line = line, .col = 0 };
-            self.cursor = .{ .line = line + 1, .col = 0 };
-        } else if (line > 0) {
+        // Deleted directly, without selecting the line first: undo brings
+        // back the cursor where it was, with nothing selected.
+        const start: Pos, const end: Pos = if (line + 1 < count)
+            .{ .{ .line = line, .col = 0 }, .{ .line = line + 1, .col = 0 } }
+        else if (line > 0)
             // Last line: the newline before it has to go too.
-            self.anchor = .{ .line = line - 1, .col = self.buf.line(line - 1).len };
-            self.cursor = .{ .line = line, .col = len };
-        } else {
-            self.anchor = .{ .line = 0, .col = 0 };
-            self.cursor = .{ .line = 0, .col = len };
-        }
+            .{ .{ .line = line - 1, .col = self.buf.line(line - 1).len }, .{ .line = line, .col = len } }
+        else
+            .{ .{ .line = 0, .col = 0 }, .{ .line = 0, .col = len } };
         self.goal = null;
-        _ = try self.deleteSelection(self.newGroup(.none));
-        self.setCursor(.{ .line = self.cursor.line, .col = 0 }, false);
+        try self.applyDelete(self.newGroup(.none), start, end);
+        self.setCursor(.{ .line = start.line, .col = 0 }, false);
         return txt;
     }
 
@@ -1723,4 +1721,27 @@ test "word jumps and double click stay fast on a very long line" {
     // Takes a few milliseconds now; the old way needed far longer than this.
     try testing.expect(ms < 2_000);
     try testing.expect(steps > 3);
+}
+
+test "undo after cutting a line brings the cursor back, nothing selected" {
+    const gpa = testing.allocator;
+    const cases = [_]struct { text: []const u8, at: Pos }{
+        .{ .text = "eins\nzwei äöü\ndrei", .at = .{ .line = 1, .col = 3 } }, // middle
+        .{ .text = "eins\nzwei", .at = .{ .line = 1, .col = 2 } }, // last line
+        .{ .text = "eins", .at = .{ .line = 0, .col = 1 } }, // only line
+    };
+    for (cases) |case| {
+        var ed = Editor.fromBuffer(gpa, try Buffer.fromBytes(gpa, case.text));
+        defer ed.deinit();
+        ed.setCursor(case.at, false);
+        const cut = (try ed.cutLine(gpa)).?;
+        gpa.free(cut);
+        try testing.expect(try ed.undo());
+        try expectContent(&ed, case.text);
+        try testing.expect(ed.selection() == null);
+        try testing.expect(ed.cursor.eql(case.at));
+        // Redo cuts it again.
+        try testing.expect(try ed.redo());
+        try testing.expect(ed.selection() == null);
+    }
 }
