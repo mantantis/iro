@@ -1696,3 +1696,31 @@ test "searching on from a selected match moves to the next one or stays" {
     try testing.expect(one.findAndSelect("only", false));
     try testing.expectEqual(Pos{ .line = 0, .col = 2 }, one.anchor.?);
 }
+
+test "word jumps and double click stay fast on a very long line" {
+    // Minified JSON with a 200 KB base64 blob: each step used to scan the
+    // line from its start, which froze iro for minutes.
+    const gpa = testing.allocator;
+    const blob_len = 200_000;
+    var src: std.ArrayList(u8) = .empty;
+    defer src.deinit(gpa);
+    try src.appendSlice(gpa, "{\"blob\":\"");
+    for (0..blob_len) |i| try src.append(gpa, "abcXYZ019+/"[i % 11]);
+    try src.appendSlice(gpa, "\",\"日本\":\"é👨‍👩‍👧\"}");
+    var ed = try makeEditor(src.items);
+    defer ed.deinit();
+
+    const start = std.Io.Timestamp.now(testing.io, .awake);
+    ed.selectWordAt(.{ .line = 0, .col = 9 + blob_len / 2 });
+    try testing.expect(ed.selection() != null);
+    ed.setCursor(.{ .line = 0, .col = 9 }, false);
+    ed.moveWordRight(false);
+    try testing.expect(ed.cursor.col > 9);
+    ed.setCursor(.{ .line = 0, .col = src.items.len }, false);
+    var steps: usize = 0;
+    while (ed.cursor.col > 0) : (steps += 1) ed.moveWordLeft(false);
+    const ms = start.durationTo(std.Io.Timestamp.now(testing.io, .awake)).toMilliseconds();
+    // Takes a few milliseconds now; the old way needed far longer than this.
+    try testing.expect(ms < 2_000);
+    try testing.expect(steps > 3);
+}

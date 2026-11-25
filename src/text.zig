@@ -195,22 +195,77 @@ fn clusterWidth(bytes: []const u8, dcol: usize, tab_width: usize) usize {
 
 /// Next character boundary after `col`, at most the end of the line.
 pub fn nextBoundary(line: []const u8, col: usize) usize {
-    var it = iterate(line, 1);
+    if (col >= line.len) return line.len;
+    const from = restartPoint(line, col);
+    var it = iterate(line[from..], 1);
     while (it.next()) |c| {
-        if (c.end() > col) return c.end();
+        if (from + c.end() > col) return from + c.end();
     }
     return line.len;
 }
 
 /// Previous character boundary before `col`, at least 0.
 pub fn prevBoundary(line: []const u8, col: usize) usize {
-    var prev: usize = 0;
-    var it = iterate(line, 1);
+    if (col == 0) return 0;
+    const to = @min(col, line.len);
+    const from = restartPoint(line, to - 1);
+    var prev: usize = from;
+    var it = iterate(line[from..], 1);
     while (it.next()) |c| {
-        if (c.end() >= col) return c.start;
-        prev = c.end();
+        if (from + c.end() >= to) return from + c.start;
+        prev = from + c.end();
     }
     return prev;
+}
+
+/// The closest position at or before `pos` where a character certainly
+/// begins, so the character boundaries around `pos` can be found from there
+/// instead of from the start of the line. Word jumps and double clicks would
+/// otherwise take quadratic time on long lines (minified JSON, base64).
+///
+/// By the Unicode rules for grapheme clusters (UAX #29), an ASCII character,
+/// a CJK ideograph or a kana letter never attaches to what comes before it,
+/// unless that is a "prepend" character (a few Arabic and Indic signs).
+fn restartPoint(line: []const u8, pos: usize) usize {
+    var s = @min(pos, line.len);
+    while (s > 0) : (s -= 1) {
+        if (s < line.len and standsAlone(line, s)) return s;
+    }
+    return 0;
+}
+
+fn standsAlone(line: []const u8, s: usize) bool {
+    const b = line[s];
+    if (b >= 0x80) {
+        // CJK ideographs and kana are three bytes long (lead byte E3–E9).
+        if (b < 0xE3 or b > 0xE9 or s + 3 > line.len) return false;
+        const cp = std.unicode.utf8Decode(line[s .. s + 3]) catch return false;
+        const simple = (cp >= 0x3041 and cp <= 0x3096) or (cp >= 0x30A1 and cp <= 0x30FA) or
+            (cp >= 0x3400 and cp <= 0x4DBF) or (cp >= 0x4E00 and cp <= 0x9FFF);
+        if (!simple) return false;
+    }
+    if (s == 0 or line[s - 1] < 0x80) return true;
+    // Find the start of the previous code point (at most 4 bytes back).
+    var p = s - 1;
+    while (p > 0 and s - p < 4 and line[p] & 0xC0 == 0x80) p -= 1;
+    // Only after a complete, valid sequence is the decoder sure to start
+    // afresh at `s`: it either read the sequence as one, or (if its first byte
+    // was swallowed by broken UTF-8 before it) rejects the rest byte by byte.
+    // After broken UTF-8, where it stands depends on what came earlier.
+    // (`utf8Decode` must get exactly one whole sequence.)
+    const n = std.unicode.utf8ByteSequenceLength(line[p]) catch return false;
+    if (n != s - p) return false;
+    const cp = std.unicode.utf8Decode(line[p..s]) catch return false;
+    return !isPrepend(cp);
+}
+
+/// Grapheme_Cluster_Break=Prepend (Unicode 16): attaches to what follows.
+fn isPrepend(cp: u21) bool {
+    return switch (cp) {
+        0x0600...0x0605, 0x06DD, 0x070F, 0x0890...0x0891, 0x08E2, 0x0D4E => true,
+        0x110BD, 0x110CD, 0x111C2...0x111C3, 0x1193F, 0x11941, 0x11A3A, 0x11A84...0x11A89, 0x11D46, 0x11F02 => true,
+        else => false,
+    };
 }
 
 /// Moves `col` back to the preceding character boundary if it lies inside a
@@ -394,6 +449,63 @@ test "displayCol and colAtDisplay agree" {
         var it = iterate(l, 4);
         while (it.next()) |c| {
             try testing.expectEqual(c.start, colAtDisplay(l, displayCol(l, c.start, 4), 4));
+        }
+    }
+}
+
+fn slowNextBoundary(line: []const u8, col: usize) usize {
+    var it = iterate(line, 1);
+    while (it.next()) |c| {
+        if (c.end() > col) return c.end();
+    }
+    return line.len;
+}
+
+fn slowPrevBoundary(line: []const u8, col: usize) usize {
+    var prev: usize = 0;
+    var it = iterate(line, 1);
+    while (it.next()) |c| {
+        if (c.end() >= col) return c.start;
+        prev = c.end();
+    }
+    return prev;
+}
+
+test "character boundaries found from a restart point match a scan from the line start" {
+    // Pieces that test the restart rules: prepend signs before ASCII and CJK,
+    // emoji sequences, flags, combining marks, kana with voicing marks,
+    // Hangul jamo, invalid and truncated UTF-8.
+    const pieces = [_][]const u8{
+        "a",          " ",           "{",          "\"",            "\t",
+        "\u{0600}",   "\u{0605}",    "\u{110BD}",  "\u{0301}",      "\u{200D}",
+        "\u{FE0F}",   "👨‍👩‍👧",      "❤️‍🔥",        "🇩🇪",           "\u{1F1E9}",
+        "日",         "本",          "か",         "\u{3099}",      "ア",
+        "\u{1100}",   "\u{1161}",    "한",         "é",             "e\u{0301}",
+        "\xff",       "\xe3\x81",    "\xe4",       "\u{094D}",      "\u{0915}",
+        "\r",         "\u{0644}",    "🏳️‍🌈",       "\u{1F3FB}",     "z",
+        "\xe3\xe3",   "\xf0\x9f",    "\x81",       "\xed\xa0\x80",  "\xe0\x80",
+    };
+    var prng = std.Random.DefaultPrng.init(0x1ce);
+    const rnd = prng.random();
+    var buf: [256]u8 = undefined;
+    for (0..3000) |_| {
+        var len: usize = 0;
+        while (true) {
+            const piece = pieces[rnd.uintLessThan(usize, pieces.len)];
+            if (len + piece.len > buf.len or rnd.uintLessThan(u8, 24) == 0) break;
+            @memcpy(buf[len .. len + piece.len], piece);
+            len += piece.len;
+        }
+        const line = buf[0..len];
+        for (0..len + 1) |col| {
+            std.testing.expectEqual(slowNextBoundary(line, col), nextBoundary(line, col)) catch |err| {
+                std.debug.print("next: line {x} col {d}\n", .{ line, col });
+                return err;
+            };
+            std.testing.expectEqual(slowPrevBoundary(line, col), prevBoundary(line, col)) catch |err| {
+                std.debug.print("prev: line {x} col {d}\n", .{ line, col });
+                return err;
+            };
         }
     }
 }

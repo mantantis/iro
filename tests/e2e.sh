@@ -697,5 +697,18 @@ ok "config_guard = false saves without prompt" 'grep -q "kaputt" "$E/check2.json
 keys C-q; sleep 0.3
 rm -f "$XDG_CONFIG_HOME/iro/init.lua"
 
+echo "Very long lines (minified JSON)"
+{ printf '{"blob":"'; head -c 200000 /dev/zero | tr '\0' 'a'; printf '"}\n'; } > "$E/long.json"
+start "$E/long.json"
+for _ in 1 2 3 4 5 6 7 8 9; do keys Right; done
+keys C-Right; sleep 1.5
+ok "Ctrl+Right crosses a 200 KB word at once" 'screen | tail -1 | grep -q "Spalte 200010"'
+keys C-q; sleep 0.3
+# On its own: from the line end back over '"}' and then the whole word.
+start "$E/long.json"
+keys End; keys C-Left; keys C-Left; sleep 1.5
+ok "Ctrl+Left crosses it back at once"        'screen | tail -1 | grep -q "Spalte 10 "'
+keys C-q; sleep 0.3
+
 echo
 if [ "$fails" -eq 0 ]; then echo "All checks passed."; else echo "$fails check(s) failed."; exit 1; fi
