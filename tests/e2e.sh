@@ -659,6 +659,36 @@ keys Down; keys End; keys BSpace; keys BSpace; keys BSpace; keys C-s; sleep 0.3
 ok "Broken shell script triggers Config Guard" 'screen | tail -1 | grep -q "Config Guard (sh)"'
 keys n; sleep 0.2; keys C-q; sleep 0.2; keys v; sleep 0.3
 
+# No false alarms: comments in JSONC files, a mount point that does not exist
+# yet (systemd creates it), and systemd versions without --recursive-errors.
+printf '{\n  "compilerOptions": {\n    "strict": true,\n  },\n}\n' > "$E/tsconfig.json"
+start "$E/tsconfig.json"
+keys Down; keys End; lit ' // comment'; keys C-s; sleep 0.3
+ok "tsconfig.json with comments saves without prompt" 'grep -q "// comment" "$E/tsconfig.json" && screen | tail -1 | grep -q "Gespeichert"'
+keys C-q; sleep 0.3
+
+printf 'tmpfs /tmp tmpfs defaults 0 0\n' > "$E/fstab"
+start "$E/fstab"
+keys End; keys Enter; lit 'tmpfs /mnt/iro-neu-angelegt tmpfs defaults 0 0'; keys C-s; sleep 0.5
+ok "fstab with a new mount point saves without prompt" 'grep -q "iro-neu-angelegt" "$E/fstab" && screen | tail -1 | grep -q "Gespeichert"'
+keys C-q; sleep 0.3
+
+mkdir -p "$E/oldsystemd"
+cat > "$E/oldsystemd/systemd-analyze" <<'EOS'
+#!/bin/sh
+# Like systemd 249: no --recursive-errors.
+for a in "$@"; do case "$a" in --recursive-errors*) echo "systemd-analyze: unrecognized option '$a'" >&2; exit 1;; esac; done
+exit 0
+EOS
+chmod +x "$E/oldsystemd/systemd-analyze"
+printf '[Service]\nExecStart=/usr/bin/true\n' > "$E/probe.service"
+EXTRA_ENV="PATH='$E/oldsystemd:$PATH'"
+start "$E/probe.service"
+keys Down; keys End; keys Enter; lit '# x'; keys C-s; sleep 0.5
+ok "Older systemd-analyze does not block saving units" 'grep -q "# x" "$E/probe.service" && screen | tail -1 | grep -q "Gespeichert"'
+keys C-q; sleep 0.3
+EXTRA_ENV=""
+
 mkdir -p "$XDG_CONFIG_HOME/iro"; printf 'config_guard = false\n' > "$XDG_CONFIG_HOME/iro/init.lua"
 printf '{"ok": true}\n' > "$E/check2.json"
 start "$E/check2.json"

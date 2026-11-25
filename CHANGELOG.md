@@ -8,7 +8,8 @@ All notable changes to iro are documented here. The format follows
 
 ### Added
 - Config Guard: validates known configs (`fstab`, `sudoers`, `sshd_config`,
-  `systemd` units, shell scripts, JSON) before saving and checks Hyprland
+  `systemd` units, shell scripts, JSON, and JSONC with comments as in VS Code
+  settings, `tsconfig.json` or Waybar) before saving and checks Hyprland
   configs via `hyprctl configerrors` right after saving (`config_guard = false`
   disables it). Works for copies opened through `sudoedit` and `visudo` too.
 - Automatic gear shifting: opening the file tree, a second tab, split view or

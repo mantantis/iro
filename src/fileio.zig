@@ -156,6 +156,20 @@ pub fn runBounded(
     stderr_limit: Io.Limit,
     timeout_ms: i64,
 ) std.process.RunError!std.process.RunResult {
+    return runBoundedEnv(gpa, io, argv, stdout_limit, stderr_limit, timeout_ms, null);
+}
+
+/// `runBounded` with a replacement environment for the child (`null`:
+/// inherit). `argv[0]` is still looked up in iro's own `PATH`.
+pub fn runBoundedEnv(
+    gpa: Allocator,
+    io: Io,
+    argv: []const []const u8,
+    stdout_limit: Io.Limit,
+    stderr_limit: Io.Limit,
+    timeout_ms: i64,
+    environ_map: ?*const std.process.Environ.Map,
+) std.process.RunError!std.process.RunResult {
     // Like `std.process.run`, which in Zig 0.17 only sends SIGTERM on timeout
     // and then waits without limit for the child to exit, and also waits
     // without limit once the child has closed its output. Here the deadline
@@ -172,6 +186,7 @@ pub fn runBounded(
         .stdout = .pipe,
         .stderr = .pipe,
         .pgid = 0,
+        .environ_map = environ_map,
     });
     var done = false;
     defer if (!done) killHard(io, &child);

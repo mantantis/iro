@@ -84,7 +84,8 @@ bleiben in beiden Gängen gleich.
 ### 🛟 Paranoid, wenn es um deine Daten geht
 
 - **Config Guard:** Bevor iro bekannte System- und Dotfile-Configs speichert
-  (`fstab`, `sudoers`, `sshd_config`, `systemd`-Units, Shell-Skripte, JSON),
+  (`fstab`, `sudoers`, `sshd_config`, `systemd`-Units, Shell-Skripte, JSON und
+  JSONC),
   prüft es den Entwurf mit dem passenden Werkzeug (`findmnt --verify`,
   `visudo -cf`, `sshd -t`, `systemd-analyze verify`, `bash -n`/`sh -n`,
   eingebauter JSON-Prüfer) und warnt vor kaputter Syntax. Hyprland-Configs prüft

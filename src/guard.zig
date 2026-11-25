@@ -24,6 +24,7 @@ pub const Checker = enum {
     bash,
     sh,
     json,
+    jsonc,
 
     pub fn toolName(self: Checker) []const u8 {
         return switch (self) {
@@ -34,6 +35,7 @@ pub const Checker = enum {
             .bash => "bash",
             .sh => "sh",
             .json => "JSON",
+            .jsonc => "JSONC",
         };
     }
 };
@@ -76,6 +78,7 @@ pub fn detect(path: []const u8, content: []const u8) ?Checker {
         if (std.mem.endsWith(u8, base, ext) and base.len > ext.len) return .systemd;
     }
 
+    if (isJsonc(path)) return .jsonc;
     if (std.mem.endsWith(u8, base, ".json")) return .json;
 
     // For scripts, an explicit shebang overrides the extension so we never run
@@ -198,7 +201,7 @@ fn shebangShell(content: []const u8) ?Checker {
 /// file is valid, no checker applies, or the external checker is unavailable.
 pub fn checkPreSave(gpa: Allocator, io: Io, path: []const u8, content: []const u8, l: Lang) Allocator.Error!?Problem {
     const kind = detect(path, content) orelse return null;
-    if (kind == .json) return checkJson(gpa, content, l);
+    if (kind == .json or kind == .jsonc) return checkJson(gpa, content, l, kind);
     return checkExternal(gpa, io, kind, path, content, l);
 }
 
@@ -225,24 +228,108 @@ pub fn checkHyprland(gpa: Allocator, io: Io) Allocator.Error!?[]u8 {
     return null;
 }
 
-fn checkJson(gpa: Allocator, content: []const u8, l: Lang) Allocator.Error!?Problem {
+fn checkJson(gpa: Allocator, content: []const u8, l: Lang, kind: Checker) Allocator.Error!?Problem {
     var body = content;
     if (std.mem.startsWith(u8, body, "\xEF\xBB\xBF")) body = body[3..];
+    var plain: ?[]u8 = null;
+    defer if (plain) |b| gpa.free(b);
+    if (kind == .jsonc) {
+        var open_at: usize = 0;
+        plain = stripJsonc(gpa, body, &open_at) catch |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            error.UnclosedComment => return try jsonProblem(gpa, kind, body, open_at, l, "comment not closed", "Kommentar nicht geschlossen"),
+        };
+        body = plain.?;
+        // An empty settings file (or one with only comments) is fine there.
+        if (std.mem.trim(u8, body, " \t\r\n").len == 0) return null;
+    }
     var scanner = std.json.Scanner.initCompleteInput(gpa, body);
     defer scanner.deinit();
     while (true) {
         const tok = scanner.next() catch |err| {
             if (err == error.OutOfMemory) return error.OutOfMemory;
             const pos = @min(scanner.cursor, body.len);
-            const line = 1 + std.mem.count(u8, body[0..pos], "\n");
-            const msg = if (l == .en)
-                try std.fmt.allocPrint(gpa, "Line {d}: syntax error ({s})", .{ line, @errorName(err) })
-            else
-                try std.fmt.allocPrint(gpa, "Zeile {d}: Syntaxfehler ({s})", .{ line, @errorName(err) });
-            return .{ .tool = Checker.json.toolName(), .detail = msg };
+            return try jsonProblem(gpa, kind, body, pos, l, @errorName(err), @errorName(err));
         };
         if (tok == .end_of_document) return null;
     }
+}
+
+fn jsonProblem(gpa: Allocator, kind: Checker, body: []const u8, pos: usize, l: Lang, why_en: []const u8, why_de: []const u8) Allocator.Error!Problem {
+    const line = 1 + std.mem.count(u8, body[0..pos], "\n");
+    const msg = if (l == .en)
+        try std.fmt.allocPrint(gpa, "Line {d}: syntax error ({s})", .{ line, why_en })
+    else
+        try std.fmt.allocPrint(gpa, "Zeile {d}: Syntaxfehler ({s})", .{ line, why_de });
+    return .{ .tool = kind.toolName(), .detail = msg };
+}
+
+/// Files read as JSON with comments (`//`, `/* */`) and trailing commas:
+/// VS Code and its forks, TypeScript, Zed, Waybar, fastfetch, dev containers.
+fn isJsonc(path: []const u8) bool {
+    const base = std.fs.path.basename(path);
+    if (std.mem.endsWith(u8, base, ".jsonc")) return true;
+    // Waybar's default config has no extension.
+    if (std.mem.eql(u8, base, "config") and std.mem.indexOf(u8, path, "/waybar/") != null) return true;
+    if (!std.mem.endsWith(u8, base, ".json")) return false;
+    const names = [_][]const u8{ "tsconfig", "jsconfig", ".eslintrc", "devcontainer", ".devcontainer", "language-configuration" };
+    for (names) |n| {
+        if (std.mem.startsWith(u8, base, n)) return true;
+    }
+    const dirs = [_][]const u8{ "/.vscode/", "/Code/User/", "/Code - OSS/User/", "/VSCodium/User/", "/Cursor/User/", "/zed/", "/waybar/", "/fastfetch/" };
+    for (dirs) |d| {
+        if (std.mem.indexOf(u8, path, d) != null) return true;
+    }
+    return false;
+}
+
+/// Turns JSONC into plain JSON with the same layout: comments and trailing
+/// commas become spaces, line breaks stay, so line numbers still match.
+/// `open_at`: where a block comment starts that is never closed.
+fn stripJsonc(gpa: Allocator, src: []const u8, open_at: *usize) error{ OutOfMemory, UnclosedComment }![]u8 {
+    const out = try gpa.dupe(u8, src);
+    errdefer gpa.free(out);
+    // A comma that is trailing if the next real character closes the list.
+    var comma: ?usize = null;
+    var i: usize = 0;
+    while (i < out.len) {
+        const c = out[i];
+        if (c == '"') {
+            comma = null;
+            i += 1;
+            while (i < out.len and out[i] != '"') : (i += 1) {
+                if (out[i] == '\\') i += 1;
+            }
+            i += 1;
+            continue;
+        }
+        if (c == '/' and i + 1 < out.len and out[i + 1] == '/') {
+            while (i < out.len and out[i] != '\n') : (i += 1) out[i] = ' ';
+            continue;
+        }
+        if (c == '/' and i + 1 < out.len and out[i + 1] == '*') {
+            const close = std.mem.indexOfPos(u8, out, i + 2, "*/") orelse {
+                open_at.* = i;
+                return error.UnclosedComment;
+            };
+            for (out[i .. close + 2]) |*b| {
+                if (b.* != '\n') b.* = ' ';
+            }
+            i = close + 2;
+            continue;
+        }
+        switch (c) {
+            ',' => comma = i,
+            ']', '}' => {
+                if (comma) |at| out[at] = ' ';
+                comma = null;
+            },
+            ' ', '\t', '\r', '\n' => {},
+            else => comma = null,
+        }
+        i += 1;
+    }
+    return out;
 }
 
 fn checkExternal(gpa: Allocator, io: Io, kind: Checker, path: []const u8, content: []const u8, l: Lang) Allocator.Error!?Problem {
@@ -273,14 +360,41 @@ fn checkExternal(gpa: Allocator, io: Io, kind: Checker, path: []const u8, conten
         .systemd => &.{ "systemd-analyze", "verify", "--recursive-errors=no", tmp_path },
         .bash => &.{ "bash", "-n", tmp_path },
         .sh => &.{ "sh", "-n", tmp_path },
-        .json => unreachable,
+        .json, .jsonc => unreachable,
     };
 
-    const result = fileio.runHelper(gpa, io, argv, .limited(64 * 1024), .limited(64 * 1024)) catch return null;
+    // findmnt runs in the C locale so its findings can be told apart below.
+    // The child gets only this variable; the program is still found via
+    // iro's own PATH.
+    var c_locale: std.process.Environ.Map = .init(gpa);
+    defer c_locale.deinit();
+    if (kind == .fstab) try c_locale.put("LC_ALL", "C");
+    const env: ?*const std.process.Environ.Map = if (kind == .fstab) &c_locale else null;
+
+    var result = runCheck(gpa, io, argv, env) orelse return null;
     defer gpa.free(result.stdout);
     defer gpa.free(result.stderr);
 
-    if (result.term == .exited and result.term.exited == 0) return null;
+    // systemd before v250 (Ubuntu 22.04, Debian 11) does not know
+    // `--recursive-errors` and rejects every unit. Ask again without it.
+    if (kind == .systemd and !passed(result) and std.mem.indexOf(u8, result.stderr, "--recursive-errors") != null) {
+        const retry = runCheck(gpa, io, &.{ "systemd-analyze", "verify", tmp_path }, null) orelse return null;
+        gpa.free(result.stdout);
+        gpa.free(result.stderr);
+        result = retry;
+    }
+
+    if (passed(result)) return null;
+
+    // `findmnt --verify` calls a mount point that does not exist yet an error,
+    // but systemd creates missing mount point directories when mounting.
+    // Everything else it reports as `[E]` counts; parse errors only appear
+    // on stderr, next to the summary.
+    if (kind == .fstab) {
+        const picked = fstabError(result.stdout) orelse
+            (fstabParseError(result.stderr) orelse return null);
+        return .{ .tool = kind.toolName(), .detail = try cleanSummary(gpa, picked, dir_path) };
+    }
 
     // Running `sshd -t` as a non-root user (e.g. under sudoedit) cannot read
     // `/etc/ssh/ssh_host_*_key`. Syntax errors are reported before host keys,
@@ -293,6 +407,47 @@ fn checkExternal(gpa: Allocator, io: Io, kind: Checker, path: []const u8, conten
     else
         try gpa.dupe(u8, if (l == .en) "check failed" else "Prüfung fehlgeschlagen");
     return .{ .tool = kind.toolName(), .detail = detail };
+}
+
+fn runCheck(gpa: Allocator, io: Io, argv: []const []const u8, env: ?*const std.process.Environ.Map) ?std.process.RunResult {
+    return fileio.runBoundedEnv(gpa, io, argv, .limited(64 * 1024), .limited(64 * 1024), fileio.helper_timeout_ms, env) catch null;
+}
+
+fn passed(result: std.process.RunResult) bool {
+    return result.term == .exited and result.term.exited == 0;
+}
+
+/// The first `[E]` finding of `findmnt --verify` (C locale), leaving out
+/// missing mount points. Output comes in blocks: the mount point unindented,
+/// its findings indented below. A relative "mount point" is never valid (it
+/// is what a garbled line turns into), so its error always counts.
+fn fstabError(stdout: []const u8) ?[]const u8 {
+    var target: []const u8 = "";
+    var it = std.mem.tokenizeScalar(u8, stdout, '\n');
+    while (it.next()) |raw| {
+        const line = std.mem.trim(u8, raw, " \t\r");
+        if (line.len == 0) continue;
+        if (raw[0] != ' ' and raw[0] != '\t') {
+            target = line;
+            continue;
+        }
+        if (!std.mem.startsWith(u8, line, "[E]")) continue;
+        if (std.mem.startsWith(u8, target, "/") and
+            std.mem.indexOf(u8, line, "unreachable on boot required target") != null) continue;
+        return line;
+    }
+    return null;
+}
+
+/// A line from findmnt's stderr other than the summary
+/// ("1 parse error, 0 errors, 0 warnings"), which starts with a number.
+fn fstabParseError(stderr: []const u8) ?[]const u8 {
+    var it = std.mem.tokenizeScalar(u8, stderr, '\n');
+    while (it.next()) |raw| {
+        const line = std.mem.trim(u8, raw, " \t\r");
+        if (line.len > 0 and !std.ascii.isDigit(line[0])) return line;
+    }
+    return null;
 }
 
 fn isSafeFileName(name: []const u8) bool {
@@ -326,16 +481,6 @@ fn onlySshdHostKeyError(stderr: []const u8, stdout: []const u8) bool {
 }
 
 fn pickErrorLine(kind: Checker, stderr: []const u8, stdout: []const u8) []const u8 {
-    if (kind == .fstab) {
-        // `findmnt --verify` prints errors to stdout marked with `[E]`.
-        for ([_][]const u8{ stdout, stderr }) |buf| {
-            var it = std.mem.tokenizeScalar(u8, buf, '\n');
-            while (it.next()) |raw| {
-                const line = std.mem.trim(u8, raw, " \t\r");
-                if (std.mem.startsWith(u8, line, "[E]")) return line;
-            }
-        }
-    }
     if (kind == .sudoers) {
         // `visudo` may warn about `/etc/sudo.conf` before the real syntax line.
         for ([_][]const u8{ stderr, stdout }) |buf| {
@@ -405,7 +550,7 @@ test "detect matches known configs and respects shebangs" {
     try testing.expectEqual(@as(?Checker, .systemd), detect("/etc/systemd/system/backup.service", ""));
     try testing.expectEqual(@as(?Checker, .systemd), detect("/home/u/.config/systemd/user/sync.timer", ""));
     try testing.expectEqual(@as(?Checker, .json), detect("/home/u/settings.json", ""));
-    try testing.expectEqual(@as(?Checker, null), detect("/home/u/settings.jsonc", ""));
+    try testing.expectEqual(@as(?Checker, .jsonc), detect("/home/u/settings.jsonc", ""));
     try testing.expectEqual(@as(?Checker, .sh), detect("/home/u/run.sh", "echo hi\n"));
     try testing.expectEqual(@as(?Checker, .bash), detect("/home/u/run.sh", "#!/usr/bin/env bash\necho hi\n"));
     try testing.expectEqual(@as(?Checker, null), detect("/home/u/run.sh", "#!/usr/bin/env zsh\necho hi\n"));
@@ -497,4 +642,96 @@ test "fstab and sshd Config Guard catches real errors and ignores non-root hostk
         try testing.expectEqualStrings("sshd", p.tool);
         try testing.expect(std.mem.indexOf(u8, p.detail, "BogusOption") != null);
     }
+}
+
+test "JSONC files allow comments and trailing commas, plain JSON does not" {
+    try testing.expectEqual(@as(?Checker, .jsonc), detect("/home/u/proj/tsconfig.json", ""));
+    try testing.expectEqual(@as(?Checker, .jsonc), detect("/home/u/proj/tsconfig.build.json", ""));
+    try testing.expectEqual(@as(?Checker, .jsonc), detect("/home/u/proj/.vscode/launch.json", ""));
+    try testing.expectEqual(@as(?Checker, .jsonc), detect("/home/u/.config/Code/User/settings.json", ""));
+    try testing.expectEqual(@as(?Checker, .jsonc), detect("/home/u/.config/waybar/config", ""));
+    try testing.expectEqual(@as(?Checker, .jsonc), detect("/home/u/.config/waybar/modules.json", ""));
+    try testing.expectEqual(@as(?Checker, .json), detect("/home/u/proj/package.json", ""));
+    try testing.expectEqual(@as(?Checker, null), detect("/home/u/.config/kitty/config", ""));
+
+    const gpa = testing.allocator;
+    const io = testing.io;
+    const settings =
+        \\// VS Code settings
+        \\{
+        \\  /* font */ "editor.fontSize": 14,
+        \\  "url": "https://example.org/*not a comment*/",
+        \\  "list": [1, 2, 3,],
+        \\  "quote": "a \" // still a string",
+        \\}
+        \\
+    ;
+    try testing.expect((try checkPreSave(gpa, io, "/p/.vscode/settings.json", settings, .en)) == null);
+    try testing.expect((try checkPreSave(gpa, io, "/p/tsconfig.json", "// only a comment\n", .en)) == null);
+
+    // The same text as plain JSON is still an error.
+    const strict = (try checkPreSave(gpa, io, "/p/package.json", settings, .en)).?;
+    defer strict.deinit(gpa);
+    try testing.expectEqualStrings("JSON", strict.tool);
+
+    // Real mistakes are caught, with the right line despite the comments.
+    const bad = (try checkPreSave(gpa, io, "/p/tsconfig.json", "{\n  /* a\n  b */\n  \"x\": 1\n  \"y\": 2\n}\n", .en)).?;
+    defer bad.deinit(gpa);
+    try testing.expectEqualStrings("JSONC", bad.tool);
+    try testing.expect(std.mem.indexOf(u8, bad.detail, "Line 5") != null);
+
+    const double = (try checkPreSave(gpa, io, "/p/tsconfig.json", "[1,,]\n", .en)).?;
+    defer double.deinit(gpa);
+
+    const open = (try checkPreSave(gpa, io, "/p/x.jsonc", "{\n\"a\": 1 /* oops\n}\n", .de)).?;
+    defer open.deinit(gpa);
+    try testing.expectEqualStrings("Zeile 2: Syntaxfehler (Kommentar nicht geschlossen)", open.detail);
+}
+
+test "fstab: a mount point that does not exist yet is no error, garbage is" {
+    const missing =
+        \\
+        \\0 parse errors, 1 error, 0 warnings
+        \\/mnt/backup
+        \\   [E] unreachable on boot required target: No such file or directory
+        \\
+    ;
+    try testing.expect(fstabError(missing) == null);
+    const garbled =
+        \\0 parse errors, 1 error, 3 warnings
+        \\line
+        \\   [E] unreachable on boot required target: No such file or directory
+        \\   [W] unreachable source: broken: No such file or directory
+        \\
+    ;
+    try testing.expectEqualStrings("[E] unreachable on boot required target: No such file or directory", fstabError(garbled).?);
+    const other =
+        \\/mnt/backup
+        \\   [E] unreachable on boot required target: No such file or directory
+        \\/data
+        \\   [E] target specified more than once
+        \\
+    ;
+    try testing.expectEqualStrings("[E] target specified more than once", fstabError(other).?);
+    try testing.expect(fstabParseError("\n0 parse errors, 1 error, 0 warnings\n") == null);
+    try testing.expectEqualStrings(
+        "findmnt: fstab: parse error at line 1 -- ignored",
+        fstabParseError("findmnt: fstab: parse error at line 1 -- ignored\n\n1 parse error, 0 errors, 0 warnings\n").?,
+    );
+
+    // With the real findmnt, if installed.
+    const gpa = testing.allocator;
+    try testing.expect((try checkPreSave(gpa, testing.io, "/etc/fstab", "tmpfs /mnt/iro-does-not-exist tmpfs defaults 0 0\n", .de)) == null);
+    if (try checkPreSave(gpa, testing.io, "/etc/fstab", "/dev/sda1 /mnt\n", .de)) |p| {
+        defer p.deinit(gpa);
+        try testing.expect(std.mem.indexOf(u8, p.detail, "parse error at line 1") != null);
+        try testing.expect(std.mem.indexOf(u8, p.detail, "iro-check-") == null);
+    } else if (findmntInstalled()) return error.TestExpectedProblem;
+}
+
+fn findmntInstalled() bool {
+    const r = fileio.runHelper(testing.allocator, testing.io, &.{ "findmnt", "--version" }, .limited(4096), .limited(4096)) catch return false;
+    testing.allocator.free(r.stdout);
+    testing.allocator.free(r.stderr);
+    return true;
 }

@@ -82,9 +82,9 @@ Alt+G switches at any time, and the keys never change between gears.
 ### 🛟 Paranoid about your data
 
 - **Config Guard:** before saving known system and dotfile configs (`fstab`,
-  `sudoers`, `sshd_config`, `systemd` units, shell scripts, JSON), iro checks
-  the draft with the matching tool (`findmnt --verify`, `visudo -cf`, `sshd -t`,
-  `systemd-analyze verify`, `bash -n`/`sh -n`, built-in JSON) and warns before
+  `sudoers`, `sshd_config`, `systemd` units, shell scripts, JSON and JSONC),
+  iro checks the draft with the matching tool (`findmnt --verify`, `visudo -cf`,
+  `sshd -t`, `systemd-analyze verify`, `bash -n`/`sh -n`, built-in JSON) and warns before
   writing broken syntax. Hyprland configs are checked with `hyprctl configerrors`
   right after saving.
 - **Atomic saves:** write to a temporary file, sync, then rename. A crash mid-save
