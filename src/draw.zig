@@ -1034,10 +1034,7 @@ fn drawSettings(self: *App, win: vaxis.Window, arena: Allocator) void {
     const desc_h: u16 = if (inner.height >= 12) 3 else 0;
     const list_h: u16 = inner.height - desc_h;
     // Keep the selected entry visible, and its heading too if possible.
-    if (self.set_sel < self.set_top) self.set_top = self.set_sel;
-    if (self.set_sel >= self.set_top + list_h) self.set_top = self.set_sel + 1 - list_h;
-    if (self.set_top > 0 and self.set_top == self.set_sel and !S.selectable(self.set_top - 1)) self.set_top -= 1;
-    self.set_top = @min(self.set_top, S.items.len -| list_h);
+    self.set_top = S.keepVisible(self.set_sel, self.set_top, list_h);
     self.set_box = .{
         .x0 = card.x,
         .x1 = card.x + card.w,

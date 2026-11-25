@@ -178,6 +178,44 @@ pub fn last() usize {
     return if (selectable(items.len - 1)) items.len - 1 else move(items.len - 1, -1);
 }
 
+/// The first row of the list to show so that entry `sel` is visible, with
+/// its heading above it if there is room. `list_h`: rows of the list.
+pub fn keepVisible(sel: usize, top: usize, list_h: usize) usize {
+    var t = top;
+    if (sel < t) t = sel;
+    if (sel >= t + list_h) t = sel + 1 - list_h;
+    if (t > 0 and t == sel and !selectable(t - 1)) t -= 1;
+    return @min(t, items.len -| list_h);
+}
+
+pub const View = struct { sel: usize, top: usize };
+
+/// Mouse wheel: scrolls the list by `delta` rows. Where the selection would
+/// leave the view it comes along, to the first or last entry still shown;
+/// otherwise `keepVisible` would scroll straight back to it.
+pub fn scroll(sel: usize, top: usize, delta: isize, list_h: usize) View {
+    if (list_h == 0) return .{ .sel = sel, .top = top };
+    const max_top: isize = @intCast(items.len -| list_h);
+    const t: usize = @intCast(std.math.clamp(@as(isize, @intCast(top)) + delta, 0, max_top));
+    const end = @min(t + list_h, items.len);
+    var s = sel;
+    if (s < t) {
+        var i = t;
+        while (i < end and !selectable(i)) i += 1;
+        if (i < end) s = i;
+    } else if (s >= end) {
+        var i = end;
+        while (i > t) {
+            i -= 1;
+            if (selectable(i)) {
+                s = i;
+                break;
+            }
+        }
+    }
+    return .{ .sel = s, .top = t };
+}
+
 pub const theme_names = blk: {
     var out: [config.presets.len][]const u8 = undefined;
     for (config.presets, 0..) |p, i| out[i] = p.name;
@@ -500,4 +538,35 @@ test "every theme loads by name, retro themes colour the text too" {
     defer cfg.deinit(gpa);
     try std.testing.expect(cfg.theme.text != .default);
     try std.testing.expect(theme_names.len >= 17);
+}
+
+test "mouse wheel scrolls the settings list instead of snapping back" {
+    const list_h = 10;
+    var sel = first();
+    var top = keepVisible(sel, 0, list_h);
+    const max_top = items.len - list_h;
+    try std.testing.expect(max_top > 6);
+    // Down to the end, the way drawing settles it after each step.
+    var steps: usize = 0;
+    while (top < max_top) : (steps += 1) {
+        const v = scroll(sel, top, 3, list_h);
+        sel = v.sel;
+        const before = top;
+        top = keepVisible(sel, v.top, list_h);
+        try std.testing.expect(top > before);
+        try std.testing.expect(selectable(sel) and sel >= top and sel < top + list_h);
+        try std.testing.expect(steps < items.len);
+    }
+    // And back up.
+    while (top > 0) {
+        const v = scroll(sel, top, -3, list_h);
+        sel = v.sel;
+        const before = top;
+        top = keepVisible(sel, v.top, list_h);
+        try std.testing.expect(top < before);
+        try std.testing.expect(selectable(sel) and sel >= top and sel < top + list_h);
+    }
+    // A selection that stays in view is left alone.
+    const v = scroll(first(), 0, 0, list_h);
+    try std.testing.expectEqual(first(), v.sel);
 }

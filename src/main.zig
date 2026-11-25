@@ -3824,8 +3824,11 @@ pub const App = struct {
             const in_list = in_card and m.row >= b.list_y and m.row < b.list_y + b.list_h;
             const idx: usize = if (in_list) self.set_top + @as(usize, @intCast(m.row - @as(i32, b.list_y))) else 0;
             switch (m.button) {
-                .wheel_up => self.set_top -|= 3,
-                .wheel_down => self.set_top += 3,
+                .wheel_up, .wheel_down => {
+                    const v = iro.settings.scroll(self.set_sel, self.set_top, if (m.button == .wheel_up) -3 else 3, b.list_h);
+                    self.set_sel = v.sel;
+                    self.set_top = v.top;
+                },
                 else => {
                     if (m.type == .press and self.set_capture) {
                         self.set_capture = false;
