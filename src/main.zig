@@ -1299,6 +1299,10 @@ pub const App = struct {
             var root_buf: [Io.Dir.max_path_bytes]u8 = undefined;
             if (self.statePath(&root_buf, "history")) |root| iro.history.keep(self.gpa, self.io, root, path) catch {};
         }
+        // For a Hyprland config: listen for the reload before writing, and
+        // remember which errors were there already.
+        var hypr: ?HyprCheck = if (self.cfg.config_guard and iro.guard.isHyprConfig(path)) self.watchHyprland() else null;
+        defer if (hypr) |*h| h.deinit(self.gpa);
         fileio.save(self.gpa, self.io, cwd, path, &self.d.ed.buf, &self.d.meta) catch |err| {
             self.after_save = .stay;
             return self.say(true, "Speichern fehlgeschlagen: {s}", "Saving failed: {s}", .{@errorName(err)});
@@ -1317,13 +1321,23 @@ pub const App = struct {
             self.loadConfig(true);
             if (!self.msg_bad) self.say(false, "Gespeichert und sofort übernommen: {s}", "Saved and applied right away: {s}", .{self.fileName()});
         }
-        if (self.cfg.config_guard and iro.guard.isHyprConfig(path) and self.env.get("HYPRLAND_INSTANCE_SIGNATURE") != null) {
-            // Give Hyprland a moment to reload the saved config, then check for errors.
-            self.io.sleep(.fromMilliseconds(80), .awake) catch {};
-            if (iro.guard.checkHyprland(self.gpa, self.io) catch null) |err_line| {
-                defer self.gpa.free(err_line);
-                self.after_save = .stay;
-                self.say(true, "Hyprland: {s} ({s} holt alte Version)", "Hyprland: {s} ({s} restores previous)", .{ err_line, self.cfg.keyLabel(.history) });
+        if (hypr) |h| {
+            // Only a reload caused by this save tells something about it. An
+            // error that was there before is shown, but does not hold up
+            // "save and quit".
+            if (h.watch.waitReload(self.io, iro.guard.HyprWatch.timeout_ms)) {
+                if (iro.guard.hyprErrors(self.gpa, self.io)) |after| {
+                    defer self.gpa.free(after);
+                    if (iro.guard.pickHyprError(self.gpa, h.before, after) catch null) |e| {
+                        defer self.gpa.free(e.line);
+                        if (e.new) {
+                            self.after_save = .stay;
+                            self.say(true, "Hyprland: {s} ({s} holt alte Version)", "Hyprland: {s} ({s} restores previous)", .{ e.line, self.cfg.keyLabel(.history) });
+                        } else {
+                            self.say(true, "Hyprland meldet weiterhin: {s}", "Hyprland still reports: {s}", .{e.line});
+                        }
+                    }
+                }
             }
         }
         const after = self.after_save;
@@ -1334,6 +1348,29 @@ pub const App = struct {
             .quit => self.requestQuit(),
             .close => self.closeCurrent(),
         }
+    }
+
+    const HyprCheck = struct {
+        watch: iro.guard.HyprWatch,
+        /// Hyprland's errors before saving.
+        before: []u8,
+
+        fn deinit(self: *HyprCheck, gpa: Allocator) void {
+            self.watch.close();
+            gpa.free(self.before);
+        }
+    };
+
+    /// `null`: not running under Hyprland, or it cannot be asked.
+    fn watchHyprland(self: *App) ?HyprCheck {
+        const sig = self.env.get("HYPRLAND_INSTANCE_SIGNATURE") orelse return null;
+        const runtime = self.env.get("XDG_RUNTIME_DIR") orelse return null;
+        const watch = iro.guard.HyprWatch.open(runtime, sig) orelse return null;
+        const before = iro.guard.hyprErrors(self.gpa, self.io) orelse {
+            watch.close();
+            return null;
+        };
+        return .{ .watch = watch, .before = before };
     }
 
     /// "Save as": gives the file its new name and saves. If saving fails, everything stays

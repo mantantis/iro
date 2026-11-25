@@ -86,7 +86,7 @@ Alt+G switches at any time, and the keys never change between gears.
   iro checks the draft with the matching tool (`findmnt --verify`, `visudo -cf`,
   `sshd -t`, `systemd-analyze verify`, `bash -n`/`sh -n`, built-in JSON) and warns before
   writing broken syntax. Hyprland configs are checked with `hyprctl configerrors`
-  right after saving.
+  once Hyprland has reloaded them after saving.
 - **Atomic saves:** write to a temporary file, sync, then rename. A crash mid-save
   leaves the old file intact. Permissions, owner and group, ACLs and symlinks
   survive. Hard-linked files are written in place, so their links hold.

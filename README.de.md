@@ -89,7 +89,8 @@ bleiben in beiden Gängen gleich.
   prüft es den Entwurf mit dem passenden Werkzeug (`findmnt --verify`,
   `visudo -cf`, `sshd -t`, `systemd-analyze verify`, `bash -n`/`sh -n`,
   eingebauter JSON-Prüfer) und warnt vor kaputter Syntax. Hyprland-Configs prüft
-  iro direkt nach dem Speichern über `hyprctl configerrors`.
+  iro über `hyprctl configerrors`, sobald Hyprland sie nach dem Speichern neu
+  geladen hat.
 - **Atomares Speichern:** erst in eine Zwischendatei schreiben, synchronisieren,
   dann umbenennen. Ein Absturz mitten im Speichern lässt die alte Datei heil.
   Rechte, Besitzer und Gruppe, ACLs und Symlinks bleiben erhalten. Dateien mit

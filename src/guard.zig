@@ -3,8 +3,8 @@
 
 //! Config Guard: checks known system and dotfile configs before saving so
 //! a typo in fstab, sudoers, sshd_config, systemd units, shell scripts or JSON
-//! is caught before it hits disk. For Hyprland configs, queries `hyprctl
-//! configerrors` right after saving.
+//! is caught before it hits disk. For Hyprland configs, waits for the reload
+//! that saving triggers and then queries `hyprctl configerrors`.
 //!
 //! If the matching checker program is not installed (or times out), iro stays
 //! quiet and saves normally.
@@ -205,10 +205,67 @@ pub fn checkPreSave(gpa: Allocator, io: Io, path: []const u8, content: []const u
     return checkExternal(gpa, io, kind, path, content, l);
 }
 
-/// Queries Hyprland for active configuration errors right after saving a
-/// Hyprland config file. Returns `null` if Hyprland reports no errors or
-/// `hyprctl` is unavailable.
-pub fn checkHyprland(gpa: Allocator, io: Io) Allocator.Error!?[]u8 {
+/// Hyprland's event socket, opened before a config is saved, so the reload
+/// that this save triggers can be waited for. A fixed pause is not enough:
+/// the reload takes 30–60 ms, more on a busy system, and reading the errors
+/// too early shows the state from before saving.
+pub const HyprWatch = struct {
+    fd: std.c.fd_t,
+
+    /// How long to wait for the reload. If Hyprland does not load the saved
+    /// file at all (or autoreload is off), no reload comes and iro stays quiet.
+    pub const timeout_ms: i64 = 500;
+
+    /// `runtime_dir` and `signature` are `XDG_RUNTIME_DIR` and
+    /// `HYPRLAND_INSTANCE_SIGNATURE`. `null`: no socket to listen on.
+    pub fn open(runtime_dir: []const u8, signature: []const u8) ?HyprWatch {
+        var addr: std.c.sockaddr.un = .{ .path = @splat(0) };
+        // One byte stays 0 as the terminator.
+        _ = std.fmt.bufPrint(addr.path[0 .. addr.path.len - 1], "{s}/hypr/{s}/.socket2.sock", .{ runtime_dir, signature }) catch return null;
+        const rc = std.c.socket(std.c.AF.UNIX, std.c.SOCK.STREAM | std.c.SOCK.CLOEXEC, 0);
+        if (rc < 0) return null;
+        if (std.c.connect(rc, @ptrCast(&addr), @sizeOf(std.c.sockaddr.un)) != 0) {
+            _ = std.c.close(rc);
+            return null;
+        }
+        return .{ .fd = rc };
+    }
+
+    pub fn close(self: HyprWatch) void {
+        _ = std.c.close(self.fd);
+    }
+
+    /// Waits up to `ms` for Hyprland's `configreloaded` event. Other events
+    /// (windows, workspaces) are skipped.
+    pub fn waitReload(self: HyprWatch, io: Io, ms: i64) bool {
+        const end = Io.Timestamp.now(io, .awake).addDuration(.fromMilliseconds(ms));
+        var line: [32]u8 = undefined;
+        var len: usize = 0;
+        var buf: [4096]u8 = undefined;
+        while (true) {
+            const left = Io.Timestamp.now(io, .awake).durationTo(end).toMilliseconds();
+            if (left <= 0) return false;
+            var fds = [_]std.posix.pollfd{.{ .fd = self.fd, .events = std.posix.POLL.IN, .revents = 0 }};
+            const ready = std.posix.poll(&fds, @intCast(@min(left, 1000))) catch return false;
+            if (ready == 0) continue;
+            const n = std.c.read(self.fd, &buf, buf.len);
+            if (n <= 0) return false;
+            for (buf[0..@intCast(n)]) |c| {
+                if (c == '\n') {
+                    if (std.mem.startsWith(u8, line[0..len], "configreloaded>>")) return true;
+                    len = 0;
+                } else if (len < line.len) {
+                    line[len] = c;
+                    len += 1;
+                }
+            }
+        }
+    }
+};
+
+/// Hyprland's current config errors (`hyprctl configerrors`), `null` if
+/// `hyprctl` is unavailable or fails.
+pub fn hyprErrors(gpa: Allocator, io: Io) ?[]u8 {
     const result = fileio.runHelper(
         gpa,
         io,
@@ -216,16 +273,41 @@ pub fn checkHyprland(gpa: Allocator, io: Io) Allocator.Error!?[]u8 {
         .limited(64 * 1024),
         .limited(16 * 1024),
     ) catch return null;
-    defer gpa.free(result.stdout);
-    defer gpa.free(result.stderr);
-    if (!(result.term == .exited and result.term.exited == 0)) return null;
-    var lines = std.mem.tokenizeScalar(u8, result.stdout, '\n');
+    gpa.free(result.stderr);
+    if (!(result.term == .exited and result.term.exited == 0)) {
+        gpa.free(result.stdout);
+        return null;
+    }
+    return result.stdout;
+}
+
+pub const HyprError = struct {
+    line: []u8,
+    /// Not there before saving, so most likely caused by this save.
+    new: bool,
+};
+
+/// The error to show after saving: the first one that is new compared to
+/// `before`, otherwise the first one that was already there.
+pub fn pickHyprError(gpa: Allocator, before: []const u8, after: []const u8) Allocator.Error!?HyprError {
+    var old: ?[]const u8 = null;
+    var lines = std.mem.tokenizeScalar(u8, after, '\n');
     while (lines.next()) |raw| {
         const line = std.mem.trim(u8, raw, " \t\r");
         if (line.len == 0 or std.ascii.eqlIgnoreCase(line, "ok")) continue;
-        return try cleanSummary(gpa, line, "");
+        if (!hasLine(before, line)) return .{ .line = try cleanSummary(gpa, line, ""), .new = true };
+        if (old == null) old = line;
     }
-    return null;
+    const line = old orelse return null;
+    return .{ .line = try cleanSummary(gpa, line, ""), .new = false };
+}
+
+fn hasLine(text_: []const u8, wanted: []const u8) bool {
+    var lines = std.mem.tokenizeScalar(u8, text_, '\n');
+    while (lines.next()) |raw| {
+        if (std.mem.eql(u8, std.mem.trim(u8, raw, " \t\r"), wanted)) return true;
+    }
+    return false;
 }
 
 fn checkJson(gpa: Allocator, content: []const u8, l: Lang, kind: Checker) Allocator.Error!?Problem {
@@ -734,4 +816,58 @@ fn findmntInstalled() bool {
     testing.allocator.free(r.stdout);
     testing.allocator.free(r.stderr);
     return true;
+}
+
+test "Hyprland: wait for the reload event, also when it arrives in pieces" {
+    const io = testing.io;
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.createDirPath(io, "hypr/sig");
+    var runtime_buf: [64]u8 = undefined;
+    const runtime = try std.fmt.bufPrint(&runtime_buf, ".zig-cache/tmp/{s}", .{tmp.sub_path});
+
+    // A stand-in for Hyprland's event socket.
+    var addr: std.c.sockaddr.un = .{ .path = @splat(0) };
+    _ = try std.fmt.bufPrint(&addr.path, "{s}/hypr/sig/.socket2.sock", .{runtime});
+    const server = std.c.socket(std.c.AF.UNIX, std.c.SOCK.STREAM | std.c.SOCK.CLOEXEC, 0);
+    try testing.expect(server >= 0);
+    defer _ = std.c.close(server);
+    try testing.expectEqual(@as(c_int, 0), std.c.bind(server, @ptrCast(&addr), @sizeOf(std.c.sockaddr.un)));
+    try testing.expectEqual(@as(c_int, 0), std.c.listen(server, 4));
+
+    try testing.expect(HyprWatch.open(runtime, "other-sig") == null);
+
+    const watch = HyprWatch.open(runtime, "sig").?;
+    defer watch.close();
+    const peer = std.c.accept(server, null, null);
+    try testing.expect(peer >= 0);
+    defer _ = std.c.close(peer);
+
+    // Other events only: no reload within the time limit.
+    const noise = "activewindow>>kitty,iro\nworkspace>>2\n";
+    _ = std.c.write(peer, noise, noise.len);
+    try testing.expect(!watch.waitReload(io, 60));
+
+    // The event split across two writes.
+    _ = std.c.write(peer, "openwindow>>a,b,c,d\nconfigrel", 29);
+    _ = std.c.write(peer, "oaded>>\n", 8);
+    try testing.expect(watch.waitReload(io, 1000));
+}
+
+test "Hyprland: only errors new since saving hold up save and quit" {
+    const gpa = testing.allocator;
+    try testing.expect((try pickHyprError(gpa, "\n\n", "\n\n")) == null);
+    try testing.expect((try pickHyprError(gpa, "", "ok\n")) == null);
+
+    const before = "Config error in file custom/rules.lua at line 3: unknown rule\n";
+    const kept = (try pickHyprError(gpa, before, before)).?;
+    defer gpa.free(kept.line);
+    try testing.expect(!kept.new);
+    try testing.expectEqualStrings("Config error in file custom/rules.lua at line 3: unknown rule", kept.line);
+
+    const after = before ++ "Config error in file custom/keybinds.lua at line 9: bad key\n";
+    const fresh = (try pickHyprError(gpa, before, after)).?;
+    defer gpa.free(fresh.line);
+    try testing.expect(fresh.new);
+    try testing.expectEqualStrings("Config error in file custom/keybinds.lua at line 9: bad key", fresh.line);
 }
