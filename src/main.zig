@@ -3793,9 +3793,7 @@ pub const App = struct {
                 const l = self.d.ed.buf.line(line);
                 const rows = draw_mod.wrappedLineRows(l, self.d.ed.tab_width, self.text_w, cur_c);
                 if (r < row_acc + rows) {
-                    const seg = r - row_acc;
-                    const target_dcol = seg * self.text_w + if (seg + 1 < rows) @min(x, self.text_w - 1) else x;
-                    return .{ .line = line, .col = text.colAtDisplay(l, target_dcol, self.d.ed.tab_width) };
+                    return .{ .line = line, .col = text.wrapColAt(l, self.d.ed.tab_width, self.text_w, r - row_acc, x) };
                 }
                 row_acc += rows;
             }

@@ -303,6 +303,87 @@ pub fn colAtDisplay(line: []const u8, dcol: usize, tab_width: usize) usize {
     return line.len;
 }
 
+/// One screen row of a soft-wrapped line: the characters whose display
+/// column lies in `[start, end)`.
+pub const Row = struct { start: usize, end: usize };
+
+/// Soft wrap: splits a line into rows of `w` screen cells, at character
+/// boundaries. A character that no longer fits at the end of a row (a wide
+/// CJK character or emoji in the last cell) moves to the next row whole and
+/// leaves that cell empty. Cutting by screen columns showed such a character
+/// on neither row. Every line has at least one row.
+pub const RowIterator = struct {
+    it: Iterator,
+    w: usize,
+    start: usize = 0,
+    pending: ?Cluster = null,
+    done: bool = false,
+
+    pub fn next(self: *RowIterator) ?Row {
+        if (self.done) return null;
+        const start = self.start;
+        while (true) {
+            const c = self.pending orelse self.it.next() orelse {
+                self.done = true;
+                return .{ .start = start, .end = self.it.dcol };
+            };
+            self.pending = null;
+            // A character wider than a whole row stays where it is (cut off).
+            if (c.dcol > start and c.dcol + c.width > start + self.w) {
+                self.pending = c;
+                self.start = c.dcol;
+                return .{ .start = start, .end = c.dcol };
+            }
+        }
+    }
+};
+
+pub fn wrapRows(line: []const u8, tab_width: usize, w: usize) RowIterator {
+    return .{ .it = iterate(line, tab_width), .w = @max(w, 1) };
+}
+
+/// How many rows a soft-wrapped line takes. One more if the cursor
+/// (`cursor_dcol`, its display column) sits at the end of a full last row:
+/// it needs a cell of its own.
+pub fn wrapRowCount(line: []const u8, tab_width: usize, w: usize, cursor_dcol: ?usize) usize {
+    var rows = wrapRows(line, tab_width, w);
+    var n: usize = 0;
+    var last: Row = .{ .start = 0, .end = 0 };
+    while (rows.next()) |r| : (n += 1) last = r;
+    if (cursor_dcol) |d| {
+        if (d == last.end and last.end >= last.start + rows.w) n += 1;
+    }
+    return n;
+}
+
+/// The row (counted like `wrapRowCount`) that shows display column `dcol`.
+pub fn wrapRowOf(line: []const u8, tab_width: usize, w: usize, dcol: usize) usize {
+    var rows = wrapRows(line, tab_width, w);
+    var k: usize = 0;
+    while (rows.next()) |r| : (k += 1) {
+        if (dcol < r.end) return k;
+        if (rows.done) return if (dcol >= r.start + rows.w) k + 1 else k;
+    }
+    return k;
+}
+
+/// Byte position for a click at screen column `x` of row `row`. Past the
+/// end of a row that continues below, the cursor stays on the last character
+/// of that row instead of jumping to the next one.
+pub fn wrapColAt(line: []const u8, tab_width: usize, w: usize, row: usize, x: usize) usize {
+    var rows = wrapRows(line, tab_width, w);
+    var k: usize = 0;
+    while (rows.next()) |r| : (k += 1) {
+        if (k < row) continue;
+        if (rows.done) return colAtDisplay(line, r.start + x, tab_width);
+        var col = colAtDisplay(line, @min(r.start + x, r.end - 1), tab_width);
+        if (displayCol(line, col, tab_width) >= r.end) col = prevBoundary(line, col);
+        return col;
+    }
+    // The extra row for the cursor at the end of the line.
+    return line.len;
+}
+
 /// Total screen width of a line.
 pub fn lineWidth(line: []const u8, tab_width: usize) usize {
     var it = iterate(line, tab_width);
@@ -507,5 +588,55 @@ test "character boundaries found from a restart point match a scan from the line
                 return err;
             };
         }
+    }
+}
+
+fn expectRows(line: []const u8, w: usize, want: []const Row) !void {
+    var rows = wrapRows(line, 4, w);
+    for (want) |r| try std.testing.expectEqual(r, rows.next().?);
+    try std.testing.expect(rows.next() == null);
+}
+
+test "soft wrap moves a wide character that does not fit to the next row" {
+    // 日 would start in the last cell of the row: it moves down whole.
+    try expectRows("abcdefg日x", 8, &.{ .{ .start = 0, .end = 7 }, .{ .start = 7, .end = 10 } });
+    // It fits exactly.
+    try expectRows("abcdef日x", 8, &.{ .{ .start = 0, .end = 8 }, .{ .start = 8, .end = 9 } });
+    // Emoji, and a run of wide characters on an odd width.
+    try expectRows("ab👨‍👩‍👧cd", 3, &.{ .{ .start = 0, .end = 2 }, .{ .start = 2, .end = 5 }, .{ .start = 5, .end = 6 } });
+    try expectRows("日本語です", 5, &.{ .{ .start = 0, .end = 4 }, .{ .start = 4, .end = 8 }, .{ .start = 8, .end = 10 } });
+    // Empty line and a character wider than the row.
+    try expectRows("", 8, &.{.{ .start = 0, .end = 0 }});
+    try expectRows("日本", 1, &.{ .{ .start = 0, .end = 2 }, .{ .start = 2, .end = 4 } });
+
+    // The cursor at the end of a full row needs a row of its own.
+    try std.testing.expectEqual(@as(usize, 1), wrapRowCount("abcdef日", 8, 8, null));
+    try std.testing.expectEqual(@as(usize, 2), wrapRowCount("abcdef日", 8, 8, 8));
+    try std.testing.expectEqual(@as(usize, 1), wrapRowOf("abcdef日", 8, 8, 8));
+    try std.testing.expectEqual(@as(usize, 1), wrapRowOf("abcdefg日x", 8, 8, 7));
+    try std.testing.expectEqual(@as(usize, 0), wrapRowOf("abcdefg日x", 8, 8, 6));
+
+    // A click in the cell left empty stays on the row: before the "g".
+    try std.testing.expectEqual(@as(usize, 6), wrapColAt("abcdefg日x", 8, 8, 0, 7));
+    // On the wide character itself, and past the end of the last row.
+    try std.testing.expectEqual(@as(usize, 7), wrapColAt("abcdefg日x", 8, 8, 1, 0));
+    try std.testing.expectEqual(@as(usize, 11), wrapColAt("abcdefg日x", 8, 8, 1, 6));
+    try std.testing.expectEqual(@as(usize, 9), wrapColAt("abcdef日", 8, 8, 1, 0));
+}
+
+test "soft wrap of narrow text matches cutting by screen columns" {
+    var prng = std.Random.DefaultPrng.init(0x3a9);
+    const rnd = prng.random();
+    var buf: [200]u8 = undefined;
+    for (0..500) |_| {
+        const len = rnd.uintLessThan(usize, buf.len);
+        for (buf[0..len]) |*b| b.* = "abc xyz_.-"[rnd.uintLessThan(usize, 10)];
+        const line = buf[0..len];
+        const w = 8 + rnd.uintLessThan(usize, 40);
+        const rows_old = @max(@as(usize, 1), (len + w - 1) / w);
+        try std.testing.expectEqual(rows_old, wrapRowCount(line, 4, w, null));
+        const eol_extra = len > 0 and len % w == 0;
+        try std.testing.expectEqual(rows_old + @intFromBool(eol_extra), wrapRowCount(line, 4, w, len));
+        for (0..len + 1) |d| try std.testing.expectEqual(d / w, wrapRowOf(line, 4, w, d));
     }
 }

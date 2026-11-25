@@ -45,13 +45,8 @@ fn inRange(r: iro.Range, p: Pos) bool {
 
 pub fn wrappedLineRows(line_bytes: []const u8, tab_width: usize, w: usize, cursor_col: ?usize) usize {
     if (w == 0) return 1;
-    const end_dcol = text.displayCol(line_bytes, line_bytes.len, tab_width);
-    const base: usize = @max(@as(usize, 1), (end_dcol + w - 1) / w);
-    const cur_eol = if (cursor_col) |cc| blk: {
-        const cd = text.displayCol(line_bytes, cc, tab_width);
-        break :blk cd == end_dcol and end_dcol > 0 and end_dcol % w == 0;
-    } else false;
-    return base + @as(usize, @intFromBool(cur_eol));
+    const cd: ?usize = if (cursor_col) |cc| text.displayCol(line_bytes, cc, tab_width) else null;
+    return text.wrapRowCount(line_bytes, tab_width, w, cd);
 }
 
 fn scrollToCursor(self: *App) void {
@@ -61,8 +56,9 @@ fn scrollToCursor(self: *App) void {
     if (self.cfg.wrap and w >= 8) {
         self.d.left_col = 0;
         if (cur.line < self.d.top_line) self.d.top_line = cur.line;
-        const cur_dcol = text.displayCol(self.d.ed.buf.line(cur.line), cur.col, self.d.ed.tab_width);
-        const cur_seg = cur_dcol / w;
+        const cur_l = self.d.ed.buf.line(cur.line);
+        const cur_dcol = text.displayCol(cur_l, cur.col, self.d.ed.tab_width);
+        const cur_seg = text.wrapRowOf(cur_l, self.d.ed.tab_width, w, cur_dcol);
         var used: usize = cur_seg + 1;
         var l = self.d.top_line;
         while (l < cur.line) : (l += 1) {
@@ -359,15 +355,27 @@ pub fn draw(self: *App) void {
                 } else |_| {}
             }
 
-            const cur_col_opt: ?usize = if (is_cur) ed.cursor.col else null;
-            const segs: usize = if (wrapping) wrappedLineRows(l, ed.tab_width, self.text_w, cur_col_opt) else 1;
+            const cur_dcol: ?usize = if (is_cur) text.displayCol(l, ed.cursor.col, ed.tab_width) else null;
+            const segs: usize = if (wrapping) text.wrapRowCount(l, ed.tab_width, self.text_w, cur_dcol) else 1;
+            // One pass over the characters for all rows of the line.
+            var rows = text.wrapRows(l, ed.tab_width, self.text_w);
+            var it = text.iterate(l, ed.tab_width);
+            var pending: ?text.Cluster = null;
+            var line_w: usize = 0;
             var seg: usize = 0;
             while (seg < segs and row < self.text_h) : ({
                 seg += 1;
                 row += 1;
             }) {
                 const y: u16 = @intCast(row);
-                const seg_left = if (wrapping) seg * self.text_w else left;
+                // Display columns shown in this row: [span.start, span.end).
+                const span: text.Row = if (!wrapping)
+                    .{ .start = left, .end = left + self.text_w }
+                else if (rows.next()) |r| blk: {
+                    line_w = r.end;
+                    break :blk r;
+                } else .{ .start = line_w, .end = line_w }; // extra row for the cursor
+                const seg_left = span.start;
 
                 if (row_bg) |bg| {
                     tw.child(.{ .y_off = y, .height = 1, .width = @intCast(self.gutter_w + self.text_w) }).fill(.{ .style = .{ .bg = bg } });
@@ -406,10 +414,13 @@ pub fn draw(self: *App) void {
                     });
                 }
 
-                var it = text.iterate(l, ed.tab_width);
-                while (it.next()) |c| {
+                while (pending orelse it.next()) |c| {
+                    pending = null;
                     if (c.dcol + c.width <= seg_left) continue;
-                    if (c.dcol >= seg_left + self.text_w) break;
+                    if (c.dcol >= span.end) {
+                        pending = c;
+                        break;
+                    }
                     const selected = if (sel) |r| inRange(r, .{ .line = line, .col = c.start }) else false;
                     const bytes = l[c.start..c.end()];
                     const hidden = text.hiddenKind(bytes);
@@ -492,17 +503,22 @@ pub fn draw(self: *App) void {
                 if (seg + 1 == segs) {
                     if (sel) |r| {
                         const eol: Pos = .{ .line = line, .col = l.len };
-                        if (inRange(r, eol) and it.dcol >= seg_left and it.dcol < seg_left + self.text_w) {
-                            tw.writeCell(@intCast(self.gutter_w + it.dcol - seg_left), y, .{
-                                .style = if (sel_bg) |bg| .{ .bg = bg } else .{ .reverse = true },
-                            });
+                        if (inRange(r, eol)) {
+                            const eol_dcol = if (wrapping) span.end else text.lineWidth(l, ed.tab_width);
+                            if (eol_dcol >= seg_left and eol_dcol < seg_left + self.text_w) {
+                                tw.writeCell(@intCast(self.gutter_w + eol_dcol - seg_left), y, .{
+                                    .style = if (sel_bg) |bg| .{ .bg = bg } else .{ .reverse = true },
+                                });
+                            }
                         }
                     }
                 }
 
-                if (is_cur) {
-                    const dcol = text.displayCol(l, ed.cursor.col, ed.tab_width);
-                    if (dcol >= seg_left and dcol < seg_left + self.text_w) {
+                if (cur_dcol) |dcol| {
+                    // At the end of the line, the cursor sits right after the
+                    // last character of the last row.
+                    const last_seg = seg + 1 == segs;
+                    if (dcol >= seg_left and (dcol < span.end or (last_seg and dcol < seg_left + self.text_w))) {
                         cursor_xy = .{ .x = @intCast(self.gutter_w + dcol - seg_left), .y = y };
                     }
                 }
@@ -638,24 +654,31 @@ fn drawInactivePane(self: *App, pane: vaxis.Window, arena: Allocator) void {
                 line_kinds = k;
             } else |_| {}
         }
-        const segs: usize = if (wrapping) wrappedLineRows(l, ed.tab_width, tw_w, null) else 1;
+        const segs: usize = if (wrapping) text.wrapRowCount(l, ed.tab_width, tw_w, null) else 1;
+        var rows = text.wrapRows(l, ed.tab_width, tw_w);
+        var it = text.iterate(l, ed.tab_width);
+        var pending: ?text.Cluster = null;
         var seg: usize = 0;
         while (seg < segs and row < self.text_h) : ({
             seg += 1;
             row += 1;
         }) {
             const y: u16 = @intCast(row);
-            const seg_left = if (wrapping) seg * tw_w else 0;
+            const span: text.Row = if (wrapping) (rows.next() orelse break) else .{ .start = 0, .end = tw_w };
+            const seg_left = span.start;
             if (seg == 0) {
                 const num = std.fmt.allocPrint(arena, "{d}", .{line + 1}) catch "";
                 _ = pane.printSegment(.{ .text = num, .style = .{ .dim = true } }, .{ .row_offset = y, .col_offset = @intCast(gw - 1 - num.len), .wrap = .none });
             } else {
                 pane.writeCell(@intCast(gw - 2), y, .{ .char = .{ .grapheme = "↪", .width = 1 }, .style = faint });
             }
-            var it = text.iterate(l, ed.tab_width);
-            while (it.next()) |c| {
+            while (pending orelse it.next()) |c| {
+                pending = null;
                 if (c.dcol + c.width <= seg_left) continue;
-                if (c.dcol >= seg_left + tw_w) break;
+                if (c.dcol >= span.end) {
+                    pending = c;
+                    break;
+                }
                 const bytes = l[c.start..c.end()];
                 const hidden = text.hiddenKind(bytes);
                 const blank = bytes[0] == '\t' or (bytes.len == 1 and bytes[0] == ' ');

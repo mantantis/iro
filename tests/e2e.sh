@@ -521,6 +521,17 @@ keys M-v; sleep 0.25
 ok "Split view closed again" 'screen | tail -1 | grep -q "Geteilte Ansicht geschlossen"'
 keys C-q; sleep 0.3
 
+# 76 text columns: 日 would start in the last cell and moves down whole.
+python3 -c 'print("a" * 75 + "日本語z")' > "$E/wrapcjk.txt"
+t kill-server 2>/dev/null; sleep 0.4
+t new-session -d -x 80 -y 16 "env XDG_STATE_HOME='$XDG_STATE_HOME' XDG_CONFIG_HOME='$XDG_CONFIG_HOME' '$IRO' '$E/wrapcjk.txt'; sleep 60"
+sleep 2.2
+keys M-w; sleep 0.25
+ok "Wide character at the wrap edge moves to the next row" 'screen | sed -n 2p | grep -q "↪ 日本語z"'
+keys End; keys Left; keys Left; keys Left; keys Left
+ok "Cursor on it shows on the next row" '[ "$(t display -p "#{cursor_x},#{cursor_y}")" = "4,1" ]'
+keys C-q; sleep 0.3
+
 cat > "$XDG_CONFIG_HOME/iro/init.lua" <<'LUA'
 startseite = false
 LUA
