@@ -353,7 +353,10 @@ pub const App = struct {
     /// Split view (Alt+V): a second viewport next to the active one.
     split_on: bool = false,
     split_right_active: bool = false,
-    split_other_doc: usize = 0,
+    /// The tab shown in the other half of the split view. A pointer, not a
+    /// position: opening and closing tabs shifts the positions of the others.
+    /// `null` (or a tab that is gone): the front tab.
+    split_other: ?*Doc = null,
     split_other_top: usize = 0,
     split_x: usize = 0,
     split_div_col: usize = 0,
@@ -1489,6 +1492,7 @@ pub const App = struct {
         if (self.d.pristine()) {
             const old = self.d;
             self.docs.items[self.cur] = doc;
+            if (self.split_other == old) self.split_other = doc;
             old.destroy(self.gpa);
         } else {
             try self.docs.insert(self.gpa, self.cur + 1, doc);
@@ -1606,14 +1610,15 @@ pub const App = struct {
                 ed.deinit();
                 return self.sayOom();
             };
+            if (self.split_other == self.d) self.split_other = null;
             self.d.destroy(gpa);
             self.docs.items[0] = fresh;
         } else {
             const old = self.docs.orderedRemove(self.cur);
+            if (self.split_other == old) self.split_other = null;
             old.destroy(gpa);
             if (self.cur >= self.docs.items.len) self.cur = self.docs.items.len - 1;
         }
-        self.split_other_doc = @min(self.split_other_doc, self.docs.items.len - 1);
         self.msg_len = 0;
         self.activate();
     }
@@ -3622,8 +3627,9 @@ pub const App = struct {
     fn toggleSplit(self: *App) void {
         self.split_on = !self.split_on;
         self.split_right_active = false;
-        self.split_other_doc = if (self.docs.items.len > 1) (self.cur + 1) % self.docs.items.len else self.cur;
-        self.split_other_top = self.docs.items[self.split_other_doc].top_line;
+        const other = self.docs.items[if (self.docs.items.len > 1) (self.cur + 1) % self.docs.items.len else self.cur];
+        self.split_other = other;
+        self.split_other_top = other.top_line;
         if (self.split_on and self.upshiftToForge()) {
             const k = self.cfg.keyLabel(.gear);
             if (k.len > 0) {
@@ -3636,13 +3642,23 @@ pub const App = struct {
         self.setMsg(false, "{s}", .{if (self.split_on) self.pick("Ansicht geteilt (Alt+Links/Rechts wechselt die Seite)", "View split (Alt+Left/Right switches sides)") else self.pick("Geteilte Ansicht geschlossen", "Split view closed")});
     }
 
+    /// Position of the tab in the other half of the split view.
+    pub fn splitOtherIndex(self: *const App) usize {
+        if (self.split_other) |other| {
+            for (self.docs.items, 0..) |doc, i| {
+                if (doc == other) return i;
+            }
+        }
+        return self.cur;
+    }
+
     pub fn switchSplitSide(self: *App, to_right: bool) void {
         if (!self.split_on or self.split_right_active == to_right) return;
-        const old_cur = self.cur;
+        const old_doc = self.d;
         const old_top = self.d.top_line;
-        const next_doc = @min(self.split_other_doc, self.docs.items.len - 1);
+        const next_doc = self.splitOtherIndex();
         const next_top = self.split_other_top;
-        self.split_other_doc = old_cur;
+        self.split_other = old_doc;
         self.split_other_top = old_top;
         self.split_right_active = to_right;
         self.cur = next_doc;

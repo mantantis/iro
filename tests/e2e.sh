@@ -708,6 +708,24 @@ ok "config_guard = false saves without prompt" 'grep -q "kaputt" "$E/check2.json
 keys C-q; sleep 0.3
 rm -f "$XDG_CONFIG_HOME/iro/init.lua"
 
+echo "Split view keeps its tab when tabs open and close"
+mkdir -p "$E/tabs"
+for n in a b c; do echo "inhalt-$n" > "$E/tabs/$n.txt"; done
+t kill-server 2>/dev/null; sleep 0.4
+t new-session -d -x 100 -y 12 "env XDG_STATE_HOME='$XDG_STATE_HOME' XDG_CONFIG_HOME='$XDG_CONFIG_HOME' '$IRO' '$E/tabs/a.txt' '$E/tabs/b.txt' '$E/tabs/c.txt'; sleep 60"
+sleep 2.2
+keys M-v; sleep 0.25
+ok "Split view shows the next tab"           'screen | grep -q "inhalt-a" && screen | grep -q "inhalt-b"'
+# A new tab goes in right after the front one and shifts the others.
+keys C-n; sleep 0.3
+ok "Other side keeps its tab after a new one" 'screen | grep -q "inhalt-b" && ! screen | grep -q "inhalt-c"'
+keys C-w; sleep 0.3
+keys C-PageUp; sleep 0.2
+ok "Back on the first tab"                   'screen | grep -q "inhalt-a"'
+keys C-w; sleep 0.3
+ok "Other side keeps its tab after closing"  'screen | grep -q "inhalt-b" && ! screen | grep -q "inhalt-c"'
+keys C-q; sleep 0.3
+
 echo "Very long lines (minified JSON)"
 { printf '{"blob":"'; head -c 200000 /dev/zero | tr '\0' 'a'; printf '"}\n'; } > "$E/long.json"
 start "$E/long.json"

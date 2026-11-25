@@ -622,7 +622,7 @@ fn drawCompletion(self: *App, tw: vaxis.Window, arena: Allocator, cur: CursorXY)
 }
 
 fn drawInactivePane(self: *App, pane: vaxis.Window, arena: Allocator) void {
-    const idx = @min(self.split_other_doc, self.docs.items.len - 1);
+    const idx = self.splitOtherIndex();
     const doc = self.docs.items[idx];
     const ed = &doc.ed;
     const line_count = ed.buf.lineCount();
