@@ -554,6 +554,12 @@ ok "Popup appears for several matches" 'screen | grep -q "alpha_eins" && screen 
 keys Down; keys Enter; sleep 0.2
 ok "Second suggestion taken with Enter" 'screen | sed -n 2p | grep -q "fensterbreite alpha_zwei"'
 keys C-q; sleep 0.2; keys v; sleep 0.3
+printf 'übermut überall\n' > "$E/umlaut.txt"
+start "$E/umlaut.txt"
+keys C-End; keys Enter; lit '    übe'; keys M-Space; sleep 0.25
+# Gutter 4 + indent 4: the box starts right under the "ü" (column 8).
+ok "Popup sits under a word with umlauts" 'screen | sed -n 3p | grep -q "^        ╭" && screen | grep -q "übermut"'
+keys Escape; keys C-q; sleep 0.2; keys v; sleep 0.3
 
 python3 -c 'print("Langzeile_" + ("wort_" * 25))' > "$E/wrap.txt"
 t kill-server 2>/dev/null; sleep 0.4

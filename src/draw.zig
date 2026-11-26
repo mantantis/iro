@@ -654,7 +654,13 @@ fn drawCompletion(self: *App, tw: vaxis.Window, arena: Allocator, cur: CursorXY)
     if (max_rows == 0 or w < 8) return;
     const h: u16 = max_rows + 2;
     const y: u16 = if (cur.y + 1 + h <= tw.height) cur.y + 1 else cur.y -| h;
-    const pref_x: u16 = cur.x -| @as(u16, @intCast(@min(self.comp_prefix_len, cur.x)));
+    // The box starts under the typed beginning of the word. Its width on
+    // screen, not its length in bytes ("über" is five bytes, four columns).
+    const ed = &self.d.ed;
+    const l = ed.buf.line(ed.cursor.line);
+    const pre_start = ed.cursor.col -| self.comp_prefix_len;
+    const pre_w = text.displayCol(l, ed.cursor.col, ed.tab_width) - text.displayCol(l, pre_start, ed.tab_width);
+    const pref_x: u16 = cur.x -| @as(u16, @intCast(@min(pre_w, cur.x)));
     const x: u16 = @min(pref_x, tw.width - w);
     const accent = self.accentColor();
     const pink = self.pinkColor();
