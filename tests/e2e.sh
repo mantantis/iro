@@ -548,6 +548,22 @@ keys End; keys Left; keys Left; keys Left; keys Left
 ok "Cursor on it shows on the next row" '[ "$(t display -p "#{cursor_x},#{cursor_y}")" = "4,1" ]'
 keys C-q; sleep 0.3
 
+# A line taller than the screen (about 40 rows at this width).
+python3 -c 'print("ANFANG " + "x" * 4000 + " SCHLUSS"); print("zweite")' > "$E/riesenzeile.txt"
+t kill-server 2>/dev/null; sleep 0.4
+t new-session -d -x 120 -y 16 "env XDG_STATE_HOME='$XDG_STATE_HOME' XDG_CONFIG_HOME='$XDG_CONFIG_HOME' '$IRO' '$E/riesenzeile.txt'; sleep 60"
+sleep 2.2
+keys M-w; sleep 0.25; keys End; sleep 0.3
+ok "End of a line taller than the screen is visible" 'screen | grep -q "x SCHLUSS" && [ "$(t display -p "#{cursor_y}")" -lt 14 ] && screen | tail -1 | grep -q "Zeile 1, Spalte 4016"'
+keys C-Home; sleep 0.2
+for i in 1 2 3 4 5; do t send-keys -l $'\e[<65;20;5M'; sleep 0.1; done; sleep 0.3
+ok "Mouse wheel scrolls through it row by row" 'screen | sed -n 1p | grep -q "↪ xxx" && ! screen | grep -q "zweite"'
+t send-keys -l $'\e[<0;30;3M'; t send-keys -l $'\e[<0;30;3m'; sleep 0.3
+ok "A click there lands where it was clicked" '[ "$(t display -p "#{cursor_x},#{cursor_y}")" = "29,2" ] && screen | tail -1 | grep -q "Zeile 1,"'
+keys C-Home; sleep 0.3
+ok "Ctrl+Home shows the start again" 'screen | sed -n 1p | grep -q "^  1 ANFANG"'
+keys C-q; sleep 0.3
+
 cat > "$XDG_CONFIG_HOME/iro/init.lua" <<'LUA'
 startseite = false
 LUA

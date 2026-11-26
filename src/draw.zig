@@ -49,27 +49,82 @@ pub fn wrappedLineRows(line_bytes: []const u8, tab_width: usize, w: usize, curso
     return text.wrapRowCount(line_bytes, tab_width, w, cd);
 }
 
+/// Screen rows of a line of the current tab. The cursor line can need one
+/// more (cursor after a full last row).
+pub fn docRows(self: *const App, line: usize) usize {
+    const ed = &self.d.ed;
+    const cur_c: ?usize = if (line == ed.cursor.line) ed.cursor.col else null;
+    return wrappedLineRows(ed.buf.line(line), ed.tab_width, self.text_w, cur_c);
+}
+
+/// Keeps `top_seg` inside the top line; without soft wrap it is always 0.
+pub fn clampTopSeg(self: *App) void {
+    if (!(self.cfg.wrap and self.text_w >= 8)) {
+        self.d.top_seg = 0;
+        return;
+    }
+    self.d.top_seg = @min(self.d.top_seg, docRows(self, self.d.top_line) - 1);
+}
+
+/// Scrolls by screen rows (soft wrap) instead of lines, so the mouse wheel
+/// also moves through a line taller than the screen.
+pub fn scrollRows(self: *App, delta: isize) void {
+    const count = self.d.ed.buf.lineCount();
+    var n: usize = @abs(delta);
+    while (n > 0) : (n -= 1) {
+        if (delta > 0) {
+            if (self.d.top_seg + 1 < docRows(self, self.d.top_line)) {
+                self.d.top_seg += 1;
+            } else if (self.d.top_line + 1 < count) {
+                self.d.top_line += 1;
+                self.d.top_seg = 0;
+            } else break;
+        } else {
+            if (self.d.top_seg > 0) {
+                self.d.top_seg -= 1;
+            } else if (self.d.top_line > 0) {
+                self.d.top_line -= 1;
+                self.d.top_seg = docRows(self, self.d.top_line) - 1;
+            } else break;
+        }
+    }
+}
+
 fn scrollToCursor(self: *App) void {
     const cur = self.d.ed.cursor;
     const h = self.text_h;
     const w = self.text_w;
     if (self.cfg.wrap and w >= 8) {
         self.d.left_col = 0;
-        if (cur.line < self.d.top_line) self.d.top_line = cur.line;
+        if (cur.line < self.d.top_line) {
+            self.d.top_line = cur.line;
+            self.d.top_seg = 0;
+        }
+        clampTopSeg(self);
         const cur_l = self.d.ed.buf.line(cur.line);
         const cur_dcol = text.displayCol(cur_l, cur.col, self.d.ed.tab_width);
         const cur_seg = text.wrapRowOf(cur_l, self.d.ed.tab_width, w, cur_dcol);
+        if (cur.line == self.d.top_line and cur_seg < self.d.top_seg) self.d.top_seg = cur_seg;
+
+        // Rows from the top of the view down to and including the cursor row.
         var used: usize = cur_seg + 1;
-        var l = self.d.top_line;
-        while (l < cur.line) : (l += 1) {
-            used += wrappedLineRows(self.d.ed.buf.line(l), self.d.ed.tab_width, w, null);
+        if (cur.line == self.d.top_line) {
+            used -= self.d.top_seg;
+        } else {
+            used += docRows(self, self.d.top_line) - self.d.top_seg;
+            var l = self.d.top_line + 1;
+            while (l < cur.line) : (l += 1) used += docRows(self, l);
         }
         while (used > h and self.d.top_line < cur.line) {
-            used -|= wrappedLineRows(self.d.ed.buf.line(self.d.top_line), self.d.ed.tab_width, w, null);
+            used -|= docRows(self, self.d.top_line) - self.d.top_seg;
             self.d.top_line += 1;
+            self.d.top_seg = 0;
         }
+        // The cursor line alone is taller than the screen: scroll within it.
+        if (used > h) self.d.top_seg += used - h;
         return;
     }
+    self.d.top_seg = 0;
 
     const margin = @min(main.scroll_margin, (h -| 1) / 2);
     if (cur.line < self.d.top_line + margin) self.d.top_line = cur.line -| margin;
@@ -276,6 +331,7 @@ pub fn draw(self: *App) void {
 
     if (self.d.follow) scrollToCursor(self);
     self.d.top_line = @min(self.d.top_line, line_count - 1);
+    clampTopSeg(self);
 
     self.syncSyntax(self.d.top_line + self.text_h, arena);
     const sel = ed.selection();
@@ -363,6 +419,12 @@ pub fn draw(self: *App) void {
             var pending: ?text.Cluster = null;
             var line_w: usize = 0;
             var seg: usize = 0;
+            // The top line can start further down (a line taller than the screen).
+            if (line == self.d.top_line) {
+                while (seg < self.d.top_seg) : (seg += 1) {
+                    if (rows.next()) |r| line_w = r.end;
+                }
+            }
             while (seg < segs and row < self.text_h) : ({
                 seg += 1;
                 row += 1;
@@ -659,6 +721,10 @@ fn drawInactivePane(self: *App, pane: vaxis.Window, arena: Allocator) void {
         var it = text.iterate(l, ed.tab_width);
         var pending: ?text.Cluster = null;
         var seg: usize = 0;
+        if (wrapping and line == top_line) {
+            const skip = @min(self.split_other_seg, segs - 1);
+            while (seg < skip) : (seg += 1) _ = rows.next();
+        }
         while (seg < segs and row < self.text_h) : ({
             seg += 1;
             row += 1;

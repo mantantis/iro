@@ -152,6 +152,9 @@ pub const Doc = struct {
     read_only: bool = false,
 
     top_line: usize = 0,
+    /// With soft wrap: the view starts this many rows into `top_line`. Only
+    /// needed for a line taller than the screen, otherwise 0.
+    top_seg: usize = 0,
     left_col: usize = 0,
     /// Should the view follow the cursor? Not while scrolling with the mouse
     /// wheel.
@@ -360,6 +363,7 @@ pub const App = struct {
     /// `null` (or a tab that is gone): the front tab.
     split_other: ?*Doc = null,
     split_other_top: usize = 0,
+    split_other_seg: usize = 0,
     split_x: usize = 0,
     split_div_col: usize = 0,
     /// Underline search matches in the text until Esc clears them.
@@ -3644,6 +3648,7 @@ pub const App = struct {
         const other = self.docs.items[if (self.docs.items.len > 1) (self.cur + 1) % self.docs.items.len else self.cur];
         self.split_other = other;
         self.split_other_top = other.top_line;
+        self.split_other_seg = other.top_seg;
         if (self.split_on and self.upshiftToForge()) {
             const k = self.cfg.keyLabel(.gear);
             if (k.len > 0) {
@@ -3670,14 +3675,18 @@ pub const App = struct {
         if (!self.split_on or self.split_right_active == to_right) return;
         const old_doc = self.d;
         const old_top = self.d.top_line;
+        const old_seg = self.d.top_seg;
         const next_doc = self.splitOtherIndex();
         const next_top = self.split_other_top;
+        const next_seg = self.split_other_seg;
         self.split_other = old_doc;
         self.split_other_top = old_top;
+        self.split_other_seg = old_seg;
         self.split_right_active = to_right;
         self.cur = next_doc;
         self.activate();
         self.d.top_line = @min(next_top, self.d.ed.buf.lineCount() - 1);
+        self.d.top_seg = next_seg; // draw keeps it inside the line
         self.d.follow = false;
         self.focus = .text;
         self.setMsg(false, "{s}", .{if (to_right) self.pick("Rechte Ansicht", "Right view") else self.pick("Linke Ansicht", "Left view")});
@@ -3817,15 +3826,17 @@ pub const App = struct {
         if (self.cfg.wrap and self.text_w >= 8) {
             var row_acc: usize = 0;
             var line = self.d.top_line;
+            // The top line may be shown from a later row on.
+            var skip = self.d.top_seg;
             const total = self.d.ed.buf.lineCount();
             while (line < total) : (line += 1) {
-                const cur_c: ?usize = if (line == self.d.ed.cursor.line) self.d.ed.cursor.col else null;
                 const l = self.d.ed.buf.line(line);
-                const rows = draw_mod.wrappedLineRows(l, self.d.ed.tab_width, self.text_w, cur_c);
+                const rows = draw_mod.docRows(self, line) -| skip;
                 if (r < row_acc + rows) {
-                    return .{ .line = line, .col = text.wrapColAt(l, self.d.ed.tab_width, self.text_w, r - row_acc, x) };
+                    return .{ .line = line, .col = text.wrapColAt(l, self.d.ed.tab_width, self.text_w, r - row_acc + skip, x) };
                 }
                 row_acc += rows;
+                skip = 0;
             }
             const last = total - 1;
             return .{ .line = last, .col = self.d.ed.buf.line(last).len };
@@ -3975,14 +3986,16 @@ pub const App = struct {
         }
 
         switch (m.button) {
-            .wheel_up => {
-                self.d.top_line -|= wheel_lines;
-                self.d.follow = false;
-                return;
-            },
-            .wheel_down => {
-                const max_top = ed.buf.lineCount() -| 1;
-                self.d.top_line = @min(self.d.top_line + wheel_lines, max_top);
+            .wheel_up, .wheel_down => {
+                const up = m.button == .wheel_up;
+                if (self.cfg.wrap and self.text_w >= 8) {
+                    // By rows, or a line taller than the screen is skipped.
+                    draw_mod.scrollRows(self, if (up) -wheel_lines else wheel_lines);
+                } else if (up) {
+                    self.d.top_line -|= wheel_lines;
+                } else {
+                    self.d.top_line = @min(self.d.top_line + wheel_lines, ed.buf.lineCount() -| 1);
+                }
                 self.d.follow = false;
                 return;
             },
@@ -4016,6 +4029,7 @@ pub const App = struct {
             self.scroll_drag = false;
             const r: usize = @intCast(std.math.clamp(m.row, 0, @as(i32, @intCast(self.text_h)) - 1));
             self.d.top_line = iro.minimap.targetTopLine(r, self.text_h, ed.buf.lineCount());
+            self.d.top_seg = 0;
             self.d.follow = false;
             return;
         }
@@ -4028,6 +4042,7 @@ pub const App = struct {
             const r: usize = @intCast(std.math.clamp(m.row, 0, @as(i32, @intCast(self.text_h)) - 1));
             const n = ed.buf.lineCount();
             self.d.top_line = @min(r * n / @max(self.text_h, 1), n -| 1);
+            self.d.top_seg = 0;
             self.d.follow = false;
             return;
         }
