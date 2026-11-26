@@ -72,6 +72,7 @@ pub const Lang = struct {
 };
 
 const c_block: Pair = .{ .open = "/*", .close = "*/" };
+const css_keywords: []const []const u8 = &.{ "important", "none", "auto", "inherit", "solid", "transparent" };
 
 pub const languages = [_]Lang{
     .{
@@ -169,13 +170,25 @@ pub const languages = [_]Lang{
         .keywords = &.{ "break", "case", "chan", "const", "continue", "default", "defer", "else", "fallthrough", "false", "for", "func", "go", "goto", "if", "import", "interface", "map", "nil", "package", "range", "return", "select", "struct", "switch", "true", "type", "var" },
     },
     .{
+        // CSS knows only /* */. "//" is not a comment there and appears in
+        // url(https://…).
         .name = "CSS",
         .hex_colors = true,
         .block_comment = c_block,
-        .line_comments = &.{"//"},
         .dash_words = true,
         .key_value = true,
-        .keywords = &.{ "important", "none", "auto", "inherit", "solid", "transparent" },
+        .keywords = css_keywords,
+    },
+    .{
+        .name = "SCSS",
+        .hex_colors = true,
+        .block_comment = c_block,
+        .line_comments = &.{"//"},
+        // Keeps url(https://…) intact.
+        .comment_needs_space = true,
+        .dash_words = true,
+        .key_value = true,
+        .keywords = css_keywords,
     },
     .{
         .name = "Nix",
@@ -305,7 +318,7 @@ const extensions = [_]ExtMap{
     .{ .ext = ".patch", .lang = "Diff" },   .{ .ext = ".mk", .lang = "Makefile" },  .{ .ext = ".mount", .lang = "Config" },
     .{ .ext = ".socket", .lang = "Config" }, .{ .ext = ".path", .lang = "Config" },  .{ .ext = ".target", .lang = "Config" },
     .{ .ext = ".editorconfig", .lang = "Config" }, .{ .ext = ".gitconfig", .lang = "Config" }, .{ .ext = ".install", .lang = "Shell" },
-    .{ .ext = ".css", .lang = "CSS" },      .{ .ext = ".scss", .lang = "CSS" },     .{ .ext = ".nix", .lang = "Nix" },
+    .{ .ext = ".css", .lang = "CSS" },      .{ .ext = ".scss", .lang = "SCSS" },     .{ .ext = ".nix", .lang = "Nix" },
     .{ .ext = ".md", .lang = "Markdown" },  .{ .ext = ".markdown", .lang = "Markdown" },
 };
 
@@ -683,6 +696,32 @@ test "Markdown: heading and code block" {
     try testing.expectEqual(Kind.string, out[0]);
     st = kinds("Markdown", "```", st, &out);
     try testing.expectEqual(normal_state, st);
+}
+
+test "CSS: // is not a comment, SCSS: // is" {
+    var out: [64]Kind = undefined;
+    try testing.expectEqualStrings("CSS", detect("/x/waybar/style.css", "").?.name);
+    try testing.expectEqualStrings("SCSS", detect("/x/eww/eww.scss", "").?.name);
+
+    const url = "background: url(https://x.org/a.png);";
+    _ = kinds("CSS", url, 0, &out);
+    for (out[0..url.len]) |k| try testing.expect(k != .comment);
+    _ = kinds("SCSS", url, 0, &out);
+    for (out[0..url.len]) |k| try testing.expect(k != .comment);
+
+    const css = "a { color: red; } // no";
+    _ = kinds("CSS", css, 0, &out);
+    try testing.expect(out[18] != .comment);
+    _ = kinds("SCSS", css, 0, &out);
+    try testing.expectEqual(Kind.comment, out[18]);
+    const top = "// at the start";
+    _ = kinds("SCSS", top, 0, &out);
+    try testing.expectEqual(Kind.comment, out[0]);
+
+    // Both still have block comments.
+    const block = "a { /* hidden */ }";
+    _ = kinds("CSS", block, 0, &out);
+    try testing.expectEqual(Kind.comment, out[6]);
 }
 
 test "random test: arbitrary bytes never break the highlighter" {

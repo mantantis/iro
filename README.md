@@ -132,7 +132,7 @@ nothing to install, nothing to update, no config archaeology after a year away.
 - **Navigation:** clickable file tree with create/rename/trash, command palette with
   fuzzy search, project-aware file search (Ctrl+O, press again for your whole
   home), folder jumps via zoxide.
-- **Syntax colours for 28 languages,** from Shell, Hyprland and kitty configs to
+- **Syntax colours for 29 languages,** from Shell, Hyprland and kitty configs to
   Zig, Rust, C/C++, Python, Go, JS/TS, Lua, Nix and Markdown.
 - **Point-and-click settings page** (Esc → Settings) with live theme preview, or
   plain Lua in `init.lua` if you prefer text.

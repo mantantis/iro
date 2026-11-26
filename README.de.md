@@ -144,7 +144,7 @@ nach einem Jahr Pause.
 - **Navigation:** klickbarer Dateibaum mit Anlegen/Umbenennen/Papierkorb,
   Befehlspalette mit unscharfer Suche, projektbezogene Dateisuche (Strg+O,
   nochmal drücken für das ganze Home), Ordnersprung per zoxide.
-- **Syntax-Farben für 28 Sprachen,** von Shell, Hyprland- und kitty-Configs bis
+- **Syntax-Farben für 29 Sprachen,** von Shell, Hyprland- und kitty-Configs bis
   Zig, Rust, C/C++, Python, Go, JS/TS, Lua, Nix und Markdown.
 - **Einstellungsseite zum Anklicken** (Esc → Einstellungen) mit Live-Vorschau der
   Farbsätze, oder schlichtes Lua in der `init.lua`, wenn dir Text lieber ist.

@@ -316,6 +316,10 @@ ok "Ctrl+D duplicates the line"    '[ "$(screen | sed -n 2p)" = "  2 eins" ] && 
 keys C-End; keys M-Up; keys M-Up
 ok "Alt+Up moves the line"     '[ "$(screen | sed -n 2p)" = "  2 drei" ]'
 keys C-q; sleep 0.2; keys v; sleep 0.3
+printf 'a { color: red; }\n' > "$E/stil.css"
+start "$E/stil.css"; keys C-k; sleep 0.3
+ok "Ctrl+K leaves CSS valid (no //)" '[ "$(screen | sed -n 1p)" = "  1 a { color: red; }" ] && screen | tail -1 | grep -q "CSS hat keine Zeilenkommentare"'
+keys C-q; sleep 0.3
 
 echo "Security: file name with control characters, private backups"
 BOESE="$E/$(printf 'b\303\266\033]2;GEKAPERT\007se.txt')"
