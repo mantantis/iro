@@ -281,15 +281,13 @@ fn readDir(
     while (it.next(io) catch null) |e| {
         if (sh.cancel.load(.monotonic)) return;
         if (!std.unicode.utf8ValidateSlice(e.name)) continue;
-        const kind = switch (e.kind) {
-            // Some file systems don't report the type right away; ask explicitly.
-            .unknown => if (dir.statFile(io, e.name, .{ .follow_symlinks = false })) |st| st.kind else |_| continue,
+        const kind = switch (finder.entryKind(dir, io, e) orelse continue) {
             // Symlink to a file: yes. To a folder: no (cycles!).
             .sym_link => if (dir.statFile(io, e.name, .{})) |st|
                 (if (st.kind == .directory) continue else st.kind)
             else |_|
                 continue,
-            else => e.kind,
+            else => |k| k,
         };
         if (kind == .directory and finder.isJunk(e.name)) continue;
         if (kind != .directory and kind != .file) continue;

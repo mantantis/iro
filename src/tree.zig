@@ -11,6 +11,7 @@
 const std = @import("std");
 const Io = std.Io;
 const Allocator = std.mem.Allocator;
+const finder = @import("finder.zig");
 
 pub const Entry = struct {
     name: []u8,
@@ -71,12 +72,8 @@ pub const Tree = struct {
             // Names that are not valid text cannot be shown by the terminal or
             // opened safely by iro. They stay out.
             if (!std.unicode.utf8ValidateSlice(e.name)) continue;
-            const is_dir = switch (e.kind) {
-                .directory => true,
-                // Symlinks show where they lead.
-                .sym_link => if (dir.statFile(io, e.name, .{})) |st| st.kind == .directory else |_| false,
-                else => false,
-            };
+            // Symlinks show where they lead.
+            const is_dir = finder.isDir(dir, io, e);
             const name = try gpa.dupe(u8, e.name);
             errdefer gpa.free(name);
             try list.append(gpa, .{ .name = name, .depth = depth, .is_dir = is_dir });

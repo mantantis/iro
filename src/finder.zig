@@ -25,6 +25,25 @@ pub fn isJunk(name: []const u8) bool {
     return false;
 }
 
+/// The type of a directory entry, without following symlinks. Some file
+/// systems (ext2 without "filetype", old XFS, some FUSE and network mounts)
+/// report every entry as unknown; then it is asked for explicitly.
+/// `null`: the entry vanished or cannot be read.
+pub fn entryKind(dir: Io.Dir, io: Io, e: Io.Dir.Entry) ?Io.File.Kind {
+    if (e.kind != .unknown) return e.kind;
+    const st = dir.statFile(io, e.name, .{ .follow_symlinks = false }) catch return null;
+    return st.kind;
+}
+
+/// Whether the entry is a folder or a symlink leading to one.
+pub fn isDir(dir: Io.Dir, io: Io, e: Io.Dir.Entry) bool {
+    return switch (entryKind(dir, io, e) orelse return false) {
+        .directory => true,
+        .sym_link => if (dir.statFile(io, e.name, .{})) |st| st.kind == .directory else |_| false,
+        else => false,
+    };
+}
+
 /// Reads all mount points. On failure the list is empty and nothing is skipped.
 pub fn mountPoints(arena: Allocator, io: Io) []const []const u8 {
     // /proc reports size 0, so read as a stream instead of readFileAlloc, which
@@ -91,11 +110,7 @@ pub fn complete(gpa: Allocator, io: Io, dir_path: []const u8, prefix: []const u8
         if (e.name[0] == '.' and (prefix.len == 0 or prefix[0] != '.')) continue;
         const is_exact = std.mem.startsWith(u8, e.name, prefix);
         if (!is_exact and !std.ascii.startsWithIgnoreCase(e.name, prefix)) continue;
-        const is_dir = switch (e.kind) {
-            .directory => true,
-            .sym_link => if (dir.statFile(io, e.name, .{})) |st| st.kind == .directory else |_| false,
-            else => false,
-        };
+        const is_dir = isDir(dir, io, e);
         const name = try std.mem.concat(gpa, u8, &.{ e.name, if (is_dir) "/" else "" });
         errdefer gpa.free(name);
         try (if (is_exact) &exact else &loose).append(gpa, name);
@@ -187,6 +202,40 @@ test "completion: unique, ambiguous, case, nothing" {
     try testing.expectEqual(@as(usize, 0), f.names.len);
 
     try testing.expectError(error.FileNotFound, complete(gpa, io, "/gibt/es/nicht", "x"));
+}
+
+test "entries of unknown type are asked for explicitly" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const io = testing.io;
+    try tmp.dir.createDirPath(io, "ordner");
+    try tmp.dir.writeFile(io, .{ .sub_path = "datei.txt", .data = "" });
+    try tmp.dir.symLink(io, "ordner", "link-ordner", .{ .is_directory = true });
+    try tmp.dir.symLink(io, "datei.txt", "link-datei", .{});
+    try tmp.dir.symLink(io, "nirgendwo", "kaputt", .{});
+
+    // What ext2 without "filetype" or some network mounts hand out.
+    const unknown = struct {
+        fn of(name: []const u8) Io.Dir.Entry {
+            return .{ .name = name, .kind = .unknown, .inode = 0 };
+        }
+    }.of;
+    const d = tmp.dir;
+    try testing.expectEqual(Io.File.Kind.directory, entryKind(d, io, unknown("ordner")).?);
+    try testing.expectEqual(Io.File.Kind.file, entryKind(d, io, unknown("datei.txt")).?);
+    try testing.expectEqual(Io.File.Kind.sym_link, entryKind(d, io, unknown("link-datei")).?);
+    try testing.expectEqual(@as(?Io.File.Kind, null), entryKind(d, io, unknown("weg")));
+
+    try testing.expect(isDir(d, io, unknown("ordner")));
+    try testing.expect(isDir(d, io, unknown("link-ordner")));
+    try testing.expect(!isDir(d, io, unknown("datei.txt")));
+    try testing.expect(!isDir(d, io, unknown("link-datei")));
+    try testing.expect(!isDir(d, io, unknown("kaputt")));
+    try testing.expect(!isDir(d, io, unknown("weg")));
+
+    // A known type is taken as reported, without asking again.
+    const told: Io.Dir.Entry = .{ .name = "weg", .kind = .directory, .inode = 0 };
+    try testing.expect(isDir(d, io, told));
 }
 
 test "mount list is not empty (Zig 0.17 pitfall with /proc)" {
