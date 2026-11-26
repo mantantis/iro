@@ -348,11 +348,18 @@ pub const Chosen = struct {
         return self.keys.get(config.canonical(lua_key));
     }
 
-    /// The content of gewaehlt.lua.
-    pub fn render(self: *const Chosen, gpa: Allocator) Allocator.Error![]u8 {
+    /// The content of gewaehlt.lua. `l`: language of the comment at the top.
+    pub fn render(self: *const Chosen, gpa: Allocator, l: Lang) Allocator.Error![]u8 {
         var out: std.ArrayList(u8) = .empty;
         errdefer out.deinit(gpa);
-        try out.appendSlice(gpa,
+        try out.appendSlice(gpa, if (l == .en)
+            \\-- Written by iro: what you clicked on the settings page
+            \\-- (main menu → Settings).
+            \\-- Please don't edit this by hand, iro rewrites the file on every click.
+            \\-- Your own wishes belong in init.lua. It is read afterwards
+            \\-- and always has the last word.
+            \\
+        else
             \\-- Von iro geschrieben: das, was du auf der Einstellungsseite
             \\-- (Hauptmenü → Einstellungen) angeklickt hast.
             \\-- Bitte nicht von Hand ändern, iro schreibt die Datei bei jedem Klick neu.
@@ -466,8 +473,14 @@ test "gewaehlt.lua: write, read back, Lua understands it" {
     try c.setKey(gpa, "kommentar", "Strg+\"");
     c.unset(gpa, "tab_breite", false);
 
-    const txt = try c.render(gpa);
+    const txt = try c.render(gpa, .de);
     defer gpa.free(txt);
+    try std.testing.expect(std.mem.startsWith(u8, txt, "-- Von iro geschrieben"));
+    const en = try c.render(gpa, .en);
+    defer gpa.free(en);
+    try std.testing.expect(std.mem.startsWith(u8, en, "-- Written by iro"));
+    // Only the comment differs; the settings themselves are the same.
+    try std.testing.expectEqualStrings(txt[std.mem.indexOf(u8, txt, "\nminimap").?..], en[std.mem.indexOf(u8, en, "\nminimap").?..]);
     try std.testing.expect(std.mem.indexOf(u8, txt, "unbekannt") == null);
     try std.testing.expect(std.mem.indexOf(u8, txt, "tab_breite") == null);
     // German names are written to the file in English.

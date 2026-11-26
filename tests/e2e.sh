@@ -531,7 +531,13 @@ mkdir -p "$XDG_CONFIG_HOME/iro"; printf 'language = "de"\n' > "$XDG_CONFIG_HOME/
 EXTRA_ENV="LANG=en_US.UTF-8" start "$E/minimap.txt"
 ok "language = de beats LANG"      'screen | tail -1 | grep -q "Zeile 1, Spalte 1"'
 keys C-q; sleep 0.3
-rm -f "$XDG_CONFIG_HOME/iro/init.lua"
+printf 'language = "en"\nkeys = { save = "Ctrl+comma" }\ncolors = { text = "default" }\n' > "$XDG_CONFIG_HOME/iro/init.lua"
+start "$E/minimap.txt"
+ok "English config words: default, comma" 'screen | tail -1 | grep -q "Ln 1, Col 1" && hints | grep -q "\^Comma  Save"'
+keys Escape; keys e; sleep 0.3; keys Right; sleep 0.3
+ok "gewaehlt.lua speaks English too" 'head -1 "$XDG_CONFIG_HOME/iro/gewaehlt.lua" | grep -q "^-- Written by iro"'
+keys Escape; sleep 0.2; keys C-q; sleep 0.3
+rm -f "$XDG_CONFIG_HOME/iro/init.lua" "$XDG_CONFIG_HOME/iro/gewaehlt.lua"
 
 echo "Word completion (Alt+Space), soft wrap (Alt+W), split view (Alt+V)"
 start "$E/comp.txt"

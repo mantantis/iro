@@ -698,6 +698,11 @@ fn canonicalKeyToken(cp: u21, raw: []const u8, buf: []u8) []const u8 {
         Key.down => "Runter",
         Key.left => "Links",
         Key.right => "Rechts",
+        // Named the same however they were written ("comma", "komma", ","),
+        // and the way labelForKey writes them.
+        ',' => "Komma",
+        '.' => "Punkt",
+        '+' => "Plus",
         else => if (cp >= 'a' and cp <= 'z') blk: {
             buf[0] = @intCast(cp - ('a' - 'A'));
             break :blk buf[0..1];
@@ -1284,7 +1289,7 @@ pub const Config = struct {
             if (parseLuaColor(L, ft)) |col| {
                 f.ptr.* = col;
             } else {
-                self.setErr(gpa, "Ungültige Farbe für '{s}' (erlaubt: 0..255 oder \"#RRGGBB\")", "Invalid color for '{s}' (allowed: 0..255 or \"#RRGGBB\")", .{f.name});
+                self.setErr(gpa, "Ungültige Farbe für '{s}' (erlaubt: \"standard\", 0..255 oder \"#RRGGBB\")", "Invalid color for '{s}' (allowed: \"default\", 0..255 or \"#RRGGBB\")", .{f.name});
             }
         }
         const AutoField = struct { name: [:0]const u8, ptr: *AutoColor };
@@ -1327,7 +1332,7 @@ fn parseLuaColor(L: *lua_State, ft: c_int) ?ColorSpec {
         var len: usize = 0;
         const ptr = lua_tolstring(L, -1, &len) orelse return null;
         const s = std.mem.trim(u8, ptr[0..len], " \t");
-        if (std.mem.eql(u8, s, "standard")) return .default;
+        if (std.mem.eql(u8, s, "standard") or std.mem.eql(u8, s, "default")) return .default;
         if (s.len == 7 and s[0] == '#') {
             const r = std.fmt.parseInt(u8, s[1..3], 16) catch return null;
             const g = std.fmt.parseInt(u8, s[3..5], 16) catch return null;
@@ -1551,7 +1556,7 @@ pub const default_init_lua_en =
     \\
     \\-- Colors: 0..255 (terminal palette, follows your wallpaper) or "#RRGGBB"
     \\colors = {
-    \\    -- text = "standard",     -- normal text ("standard" = the terminal's text color)
+    \\    -- text = "default",      -- normal text ("default" = the terminal's text color)
     \\    -- accent = 6,
     \\    -- key = 3,               -- keys in the hint bar and menu
     \\    -- warning = 3,
@@ -1979,6 +1984,22 @@ test "key parser understands German and English spellings" {
 
     try std.testing.expect((try KeyBind.parse(gpa, "")) == null);
     try std.testing.expectError(error.InvalidKey, KeyBind.parse(gpa, "Quatsch+X"));
+
+    // Comma, period and plus get one name each, however they were written.
+    for ([_][]const u8{ "Ctrl+comma", "Strg+komma", "Strg+Komma", "Ctrl+," }) |spec| {
+        const k = (try KeyBind.parse(gpa, spec)).?;
+        defer k.deinit(gpa);
+        try std.testing.expectEqualStrings("Strg+Komma", k.label);
+        try std.testing.expectEqualStrings("Ctrl+Comma", k.label_en);
+    }
+    for ([_][]const u8{ "Alt+period", "Alt+." }) |spec| {
+        const k = (try KeyBind.parse(gpa, spec)).?;
+        defer k.deinit(gpa);
+        try std.testing.expectEqualStrings("Alt+Period", k.label_en);
+    }
+    const plus = (try KeyBind.parse(gpa, "Strg++")).?;
+    defer plus.deinit(gpa);
+    try std.testing.expectEqualStrings("Strg+Plus", plus.label);
 }
 
 test "Lua config loads options, keys and colours" {
@@ -2136,6 +2157,12 @@ test "language and English key names" {
     try std.testing.expectEqualStrings("^Q", cfg.shortKey(arena.allocator(), .quit));
     cfg.lang = .de;
     try std.testing.expectEqualStrings("Strg+Umschalt+Entf", cfg.keyLabel(.save));
+    // "default" is the English word for "standard".
+    var plain = try Config.loadFromSlice(gpa, "colors = { text = \"default\", comment = \"standard\" }");
+    defer plain.deinit(gpa);
+    try std.testing.expect(plain.err_msg == null);
+    try std.testing.expectEqual(ColorSpec.default, plain.theme.text);
+    try std.testing.expectEqual(ColorSpec.default, plain.theme.kommentar);
     var quatsch = try Config.loadFromSlice(gpa, "language = \"klingonisch\"");
     defer quatsch.deinit(gpa);
     try std.testing.expect(quatsch.err_msg != null);

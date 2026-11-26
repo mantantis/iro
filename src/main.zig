@@ -1931,7 +1931,7 @@ pub const App = struct {
     }
 
     /// [Y]es at the trash prompt. The trash is the system's, the same as in
-    /// Dolphin; everything can be restored from there.
+    /// the file manager; everything can be restored from there.
     fn treeTrash(self: *App) void {
         const gpa = self.gpa;
         const path = self.tree_target orelse return;
@@ -3013,7 +3013,7 @@ pub const App = struct {
     fn commitChosen(self: *App, what: []const u8) void {
         var buf: [Io.Dir.max_path_bytes]u8 = undefined;
         const path = self.chosenPath(&buf) orelse return self.say(true, "Kein Config-Ordner gefunden", "No config folder found", .{});
-        const txt = self.chosen.render(self.gpa) catch return self.sayOom();
+        const txt = self.chosen.render(self.gpa, self.lang) catch return self.sayOom();
         defer self.gpa.free(txt);
         const cwd = Io.Dir.cwd();
         if (std.fs.path.dirname(path)) |dir| cwd.createDirPath(self.io, dir) catch {};
@@ -4192,7 +4192,7 @@ const usage_de =
     \\  F12     speichern unter neuem Namen
     \\  Strg+B  Dateibaum holen, nochmal: Baum weg (Esc: zurück zum Text)
     \\          im Baum: N neue Datei, O neuer Ordner, F2 umbenennen,
-    \\          Entf legt in den Papierkorb (derselbe wie in Dolphin)
+    \\          Entf legt in den Papierkorb (derselbe wie im Dateimanager)
     \\
     \\  Strg+P  Befehlspalette: alle Befehle zum Suchen und Auswählen
     \\  Alt+H   Hilfe: alle Tasten und Zeichen kurz erklärt
@@ -4239,7 +4239,7 @@ const usage_en =
     \\  F12     save under a new name
     \\  Ctrl+B  show the file tree, again: hide it (Esc: back to the text)
     \\          in the tree: N new file, O new folder, F2 rename,
-    \\          Del moves to the trash (the same one Dolphin uses)
+    \\          Del moves to the trash (the same one your file manager uses)
     \\
     \\  Ctrl+P  command palette: every command, searchable
     \\  Alt+H   help: every key and mark explained
