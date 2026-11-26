@@ -660,6 +660,18 @@ ok "init.lua key applies"              'screen | grep -q "# iro – Hilfe"'
 keys C-q; sleep 0.3
 rm -f "$XDG_CONFIG_HOME/iro/init.lua" "$G"
 
+# A low window: the page has to scroll. Mouse wheel as SGR sequences.
+t kill-server 2>/dev/null; sleep 0.4
+t new-session -d -x 100 -y 16 "env XDG_STATE_HOME='$XDG_STATE_HOME' XDG_CONFIG_HOME='$XDG_CONFIG_HOME' '$IRO' '$E/baum/a.txt'; sleep 60"
+sleep 2.2
+keys Escape; keys e; sleep 0.3
+for i in 1 2 3 4 5 6; do t send-keys -l $'\e[<65;50;8M'; sleep 0.1; done; sleep 0.3
+ok "Mouse wheel scrolls the settings page" '! screen | grep -q "Farbsatz" && screen | grep -q "▌ *Punkt-Dateien im Baum"'
+for i in 1 2 3 4 5 6; do t send-keys -l $'\e[<64;50;8M'; sleep 0.1; done; sleep 0.3
+ok "And back up again"                  'screen | grep -q "Farbsatz" && ! screen | grep -q "Punkt-Dateien im Baum"'
+keys Escape; sleep 0.2; keys C-q; sleep 0.3
+rm -f "$G"
+
 echo "File search: project, whole home, typos, recently opened"
 H="$T/heim"
 mkdir -p "$H/proj/.git" "$H/proj/src/tief" "$H/.config/hypr" "$H/Dokumente/Rechnungen" "$H/proj/node_modules/kram"
