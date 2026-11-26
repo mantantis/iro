@@ -45,6 +45,8 @@
         "zig-pkg",
         "README.md",
         "README.de.md",
+        "CHANGELOG.md",
+        "SECURITY.md",
         "LICENSE",
         "NOTICE.md",
         "PKGBUILD",

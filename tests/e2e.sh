@@ -17,7 +17,7 @@ export XDG_RUNTIME_DIR="$E/run"; mkdir -m 700 "$XDG_RUNTIME_DIR"
 # For the trash test: a folder on the same disk as the home directory (/tmp has
 # no trash) with its own throwaway trash.
 mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}"
-T="$(mktemp -d -p "${XDG_CACHE_HOME:-$HOME/.cache}" iro-probelauf.XXXXXX)"
+T="$(mktemp -d -p "${XDG_CACHE_HOME:-$HOME/.cache}" iro-e2e.XXXXXX)"
 trap 'tmux -L irotest kill-server 2>/dev/null; rm -rf "$E" "$T"' EXIT
 fails=0
 # The checks expect the German UI regardless of system settings (CI runs in
