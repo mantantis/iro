@@ -301,6 +301,31 @@ ok "All replaces the rest"          '[ "$(screen | sed -n 3p)" = "  3 grün grü
 ok "Skipped match stays"    '[ "$(screen | sed -n 1p)" = "  1 grün und rot" ]'
 keys C-q; sleep 0.2; keys v; sleep 0.3
 
+echo "Changes from outside (focus in)"
+focus() { t send-keys -l $'\e[O'; t send-keys -l $'\e[I'; sleep 0.4; }
+printf 'alt eins\nalt zwei\n' > "$E/aussen.txt"
+start "$E/aussen.txt"
+printf 'frisch\n' > "$E/aussen.txt"; focus
+ok "Untouched tab reloads on focus" '[ "$(screen | sed -n 1p)" = "  1 frisch" ] && screen | tail -1 | grep -q "von außen geändert, neu geladen"'
+keys C-q; sleep 0.3
+printf 'alt eins\nalt zwei\n' > "$E/aussen.txt"
+start "$E/aussen.txt"
+keys C-r; lit 'alt'; keys Enter; lit 'NEU'; keys Enter; sleep 0.2
+printf 'xx\nalt drei\n' > "$E/aussen.txt"; focus
+ok "No reload under an open prompt" '[ "$(screen | sed -n 1p)" = "  1 alt eins" ]'
+keys j; sleep 0.2
+ok "Replace still hits the right spot" '[ "$(screen | sed -n 1p)" = "  1 NEU eins" ]'
+keys Escape; sleep 0.3
+ok "Check runs once the prompt closes" 'screen | tail -1 | grep -q "auch von außen geändert"'
+keys C-q; sleep 0.2; keys v; sleep 0.3
+printf 'alt eins\n' > "$E/aussen.txt"
+start "$E/aussen.txt"
+keys C-g; sleep 0.2
+printf 'nachgeholt\n' > "$E/aussen.txt"; focus
+keys Escape; sleep 0.3
+ok "Reload follows after a harmless prompt" '[ "$(screen | sed -n 1p)" = "  1 nachgeholt" ]'
+keys C-q; sleep 0.3
+
 echo "Editing lines: indent, comment, duplicate, move"
 printf 'eins\nzwei\ndrei\n' > "$E/zeilen.sh"
 start "$E/zeilen.sh"; keys S-Down; keys S-Down; keys Tab

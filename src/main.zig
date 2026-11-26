@@ -279,6 +279,10 @@ pub const App = struct {
     gutter_w: usize = 4,
 
     prompt: ?Prompt = null,
+    /// iro came back into focus while a prompt was open. The files are looked
+    /// at once it closes: reloading under an open prompt (replace one by one,
+    /// a question about this very text) would leave it pointing at old text.
+    outside_pending: bool = false,
     /// The command palette, while it is open.
     palette: ?Palette = null,
     /// Where the palette list was last drawn, for mouse clicks.
@@ -4525,11 +4529,22 @@ pub fn main(init: std.process.Init) !void {
                 app.queryColors();
                 continue;
             },
-            .focus_in => if (!app.checkAllOutside()) continue,
+            .focus_in => {
+                if (app.prompt != null) {
+                    app.outside_pending = true;
+                    continue;
+                }
+                if (!app.checkAllOutside()) continue;
+            },
             .terminate => {
                 app.backupAll();
                 break;
             },
+        }
+        // The prompt that held back the check has just closed.
+        if (app.outside_pending and app.prompt == null) {
+            app.outside_pending = false;
+            _ = app.checkAllOutside();
         }
         draw_mod.draw(&app);
         // A terminal that can no longer be written to is gone.
