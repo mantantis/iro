@@ -141,8 +141,12 @@ fn listIn(arena: Allocator, io: Io, dir: Io.Dir) ![]Version {
     var it = dir.iterate();
     while (it.next(io) catch null) |e| {
         if (e.kind != .file or !std.mem.endsWith(u8, e.name, ext)) continue;
-        const ns = std.fmt.parseInt(u96, e.name[0 .. e.name.len - ext.len], 10) catch continue;
-        try out.append(arena, .{ .name = try arena.dupe(u8, e.name), .written_ns = @intCast(ns) });
+        const digits = e.name[0 .. e.name.len - ext.len];
+        // Only names iro could have written: digits only, and a number that
+        // fits. A hand-made "99…9.v" is skipped instead of overflowing.
+        if (digits.len == 0 or std.mem.indexOfNone(u8, digits, "0123456789") != null) continue;
+        const ns = std.fmt.parseInt(u96, digits, 10) catch continue;
+        try out.append(arena, .{ .name = try arena.dupe(u8, e.name), .written_ns = std.math.cast(i96, ns) orelse continue });
     }
     std.mem.sortUnstable(Version, out.items, {}, struct {
         fn newer(_: void, a: Version, b: Version) bool {
@@ -285,4 +289,25 @@ test "a symlink to a secret is a secret; a new file is judged by name" {
     try testing.expect(!isSecret(io, notes));
     try testing.expect(isSecret(io, new_env));
     try testing.expect(!isSecret(io, new_conf));
+}
+
+test "file names iro never writes are skipped, not a crash" {
+    var tmp = std.testing.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+    const io = std.testing.io;
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    // 2^95 and more do not fit the time stamp, u96 overflow, no number, sign.
+    for ([_][]const u8{
+        "000001732000000000000000" ++ ext,
+        "39614081257132168796771975168" ++ ext,
+        "99999999999999999999999999999999" ++ ext,
+        "keine-zahl" ++ ext,
+        "+5" ++ ext,
+        ext,
+    }) |name| try tmp.dir.writeFile(io, .{ .sub_path = name, .data = "x" });
+    const versions = try listIn(arena, io, tmp.dir);
+    try std.testing.expectEqual(@as(usize, 1), versions.len);
+    try std.testing.expectEqual(@as(i96, 1732000000000000000), versions[0].written_ns);
 }
