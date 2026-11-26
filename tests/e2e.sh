@@ -320,6 +320,10 @@ printf 'a { color: red; }\n' > "$E/stil.css"
 start "$E/stil.css"; keys C-k; sleep 0.3
 ok "Ctrl+K leaves CSS valid (no //)" '[ "$(screen | sed -n 1p)" = "  1 a { color: red; }" ] && screen | tail -1 | grep -q "CSS hat keine Zeilenkommentare"'
 keys C-q; sleep 0.3
+mkdir -p "$E/dotfiles"; printf 'bind = SUPER, Q, exec, kitty\n' > "$E/dotfiles/hyprland.conf"
+start "$E/dotfiles/hyprland.conf"
+ok "hyprland.conf outside the hypr folder is Hyprland" 'screen | tail -1 | grep -q "· *Hyprland *·"'
+keys C-q; sleep 0.3
 
 echo "Security: file name with control characters, private backups"
 BOESE="$E/$(printf 'b\303\266\033]2;GEKAPERT\007se.txt')"

@@ -326,8 +326,12 @@ const extensions = [_]ExtMap{
 pub fn detect(path: []const u8, first_line: []const u8) ?*const Lang {
     const base = std.fs.path.basename(path);
 
-    // Hyprland files are also called *.conf but have their own rules.
-    if (std.mem.indexOf(u8, path, "/hypr/") != null and std.mem.endsWith(u8, base, ".conf")) return langNamed("Hyprland");
+    // Hyprland files are also called *.conf but have their own rules. Outside
+    // the hypr folder (dotfiles repo, a copy) the name gives them away:
+    // hyprland.conf, hyprlock.conf, hypridle.conf, hyprpaper.conf, …
+    if (std.mem.endsWith(u8, base, ".conf") and
+        (std.mem.indexOf(u8, path, "/hypr/") != null or std.mem.startsWith(u8, base, "hypr")))
+        return langNamed("Hyprland");
 
     const names = [_]ExtMap{
         .{ .ext = ".zshrc", .lang = "Shell" },     .{ .ext = ".bashrc", .lang = "Shell" },  .{ .ext = ".profile", .lang = "Shell" },
@@ -596,6 +600,11 @@ fn kinds(lang_name: []const u8, line: []const u8, state: State, out: []Kind) Sta
 test "language is detected" {
     try testing.expectEqualStrings("Hyprland", detect("/home/x/.config/hypr/hyprland.conf", "").?.name);
     try testing.expectEqualStrings("Config", detect("/home/x/.config/kitty/kitty.conf", "").?.name);
+    // Outside the hypr folder the name decides.
+    try testing.expectEqualStrings("Hyprland", detect("/home/x/dotfiles/hyprland.conf", "").?.name);
+    try testing.expectEqualStrings("Hyprland", detect("hyprlock.conf", "").?.name);
+    try testing.expectEqualStrings("Config", detect("/home/x/dotfiles/kitty.conf", "").?.name);
+    try testing.expectEqualStrings("Lua", detect("/home/x/.config/hypr/hyprland.lua", "").?.name);
     try testing.expectEqualStrings("Lua", detect("init.lua", "").?.name);
     try testing.expectEqualStrings("Shell", detect("/home/x/.zshrc", "").?.name);
     try testing.expectEqualStrings("Python", detect("skript", "#!/usr/bin/env python3").?.name);
