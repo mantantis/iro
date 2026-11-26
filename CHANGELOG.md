@@ -13,6 +13,9 @@ All notable changes to iro are documented here. The format follows
   configs via `hyprctl configerrors` once Hyprland has reloaded them
   (`config_guard = false` disables it). Works for copies opened through
   `sudoedit` and `visudo` too.
+- Toggle comment (Ctrl+K) in CSS and HTML wraps each line in `/* … */` or
+  `<!-- … -->` and leaves lines alone that already contain a closing marker,
+  since block comments cannot be nested.
 - Automatic gear shifting: opening the file tree, a second tab, split view or
   file search in Blade shifts up to Forge (`auto_gear = false` disables it).
 - Local history of earlier file versions: the last 20 per file, Alt+R brings one back.

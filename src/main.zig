@@ -2831,7 +2831,12 @@ pub const App = struct {
             },
             .comment => {
                 const lang = self.d.lang orelse return self.say(false, "Für diese Datei kennt iro kein Kommentarzeichen", "iro knows no comment marker for this file", .{});
-                if (lang.line_comments.len == 0) return self.say(false, "{s} hat keine Zeilenkommentare", "{s} has no line comments", .{lang.name});
+                if (lang.line_comments.len == 0) {
+                    const bc = lang.block_comment orelse return self.say(false, "{s} hat keine Kommentare", "{s} has no comments", .{lang.name});
+                    const done = ed.toggleBlockComment(bc.open, bc.close) catch return self.sayOom();
+                    if (!done) return self.say(false, "Hier steht schon {s}, Blockkommentare lassen sich nicht verschachteln", "This already contains {s}, block comments cannot be nested", .{bc.close});
+                    return;
+                }
                 ed.toggleComment(lang.line_comments[0]) catch return self.sayOom();
             },
             .duplicate_line => {

@@ -480,6 +480,78 @@ pub const Editor = struct {
         }
     }
 
+    /// For languages without line comments (CSS, HTML): wraps each selected
+    /// line (or the current one) in `open … close`. If all are wrapped already,
+    /// the markers are removed again. Block comments cannot be nested, so a
+    /// line that already contains `close` is left alone and nothing happens:
+    /// returns false.
+    pub fn toggleBlockComment(self: *Editor, open: []const u8, close: []const u8) Error!bool {
+        if (open.len == 0 or close.len == 0 or open.len > 16 or close.len > 16) return true;
+        const span = self.lineSpan();
+
+        var all_commented = true;
+        var any = false;
+        var nested = false;
+        var min_indent: usize = std.math.maxInt(usize);
+        var line = span.first;
+        while (line <= span.last) : (line += 1) {
+            const l = self.buf.line(line);
+            const ind = text.indentLen(l);
+            if (ind == l.len) continue;
+            any = true;
+            min_indent = @min(min_indent, ind);
+            const body = std.mem.trimEnd(u8, l[ind..], " \t");
+            if (!isWrapped(body, open, close)) all_commented = false;
+            if (std.mem.indexOf(u8, body, close) != null) nested = true;
+        }
+        if (!any) return true;
+        if (!all_commented and nested) return false;
+
+        const group = self.newGroup(.none);
+        const mark = self.undo_stack.items.len;
+        errdefer self.rollbackTo(mark);
+        self.goal = null;
+
+        var buf: [17]u8 = undefined;
+        line = span.first;
+        while (line <= span.last) : (line += 1) {
+            const l = self.buf.line(line);
+            const ind = text.indentLen(l);
+            if (ind == l.len) continue;
+            if (all_commented) {
+                // The closing marker first: removing it leaves the columns
+                // before it as they are.
+                const end = ind + std.mem.trimEnd(u8, l[ind..], " \t").len;
+                var from = end - close.len;
+                if (from > ind + open.len and l[from - 1] == ' ') from -= 1;
+                try self.applyDelete(group, .{ .line = line, .col = from }, .{ .line = line, .col = end });
+                self.shiftCols(line, from, -@as(isize, @intCast(end - from)), false);
+                var n = open.len;
+                if (ind + n < from and l[ind + n] == ' ') n += 1;
+                try self.applyDelete(group, .{ .line = line, .col = ind }, .{ .line = line, .col = ind + n });
+                self.shiftCols(line, ind, -@as(isize, @intCast(n)), false);
+            } else {
+                buf[0] = ' ';
+                @memcpy(buf[1 .. 1 + close.len], close);
+                _ = try self.applyInsert(group, .{ .line = line, .col = l.len }, buf[0 .. 1 + close.len]);
+                self.shiftCols(line, l.len, @intCast(1 + close.len), false);
+                @memcpy(buf[0..open.len], open);
+                buf[open.len] = ' ';
+                _ = try self.applyInsert(group, .{ .line = line, .col = min_indent }, buf[0 .. open.len + 1]);
+                self.shiftCols(line, min_indent, @intCast(open.len + 1), true);
+            }
+        }
+        return true;
+    }
+
+    /// `/* a */` yes, `/* a */ b /* c */` no: there the markers belong to two
+    /// comments and removing them would break the line.
+    fn isWrapped(body: []const u8, open: []const u8, close: []const u8) bool {
+        if (body.len < open.len + close.len) return false;
+        if (!std.mem.startsWith(u8, body, open) or !std.mem.endsWith(u8, body, close)) return false;
+        return std.mem.indexOf(u8, body[open.len .. body.len - close.len], close) == null;
+    }
+
     /// Duplicates the line under the cursor. The cursor moves into the copy.
     pub fn duplicateLine(self: *Editor) Error!void {
         const group = self.newGroup(.none);
@@ -1441,6 +1513,69 @@ test "toggle comment" {
     try expectContent(&ed, "a = 1\n    b = 2\n\nc");
 }
 
+test "toggle block comment (CSS, HTML)" {
+    var ed = try makeEditor("a { color: red; }\n  b { }\n\nc");
+    defer ed.deinit();
+    ed.setCursor(.{ .line = 0, .col = 4 }, false);
+    try testing.expect(try ed.toggleBlockComment("/*", "*/"));
+    try expectContent(&ed, "/* a { color: red; } */\n  b { }\n\nc");
+    try testing.expectEqual(Pos{ .line = 0, .col = 7 }, ed.cursor);
+    try testing.expect(try ed.toggleBlockComment("/*", "*/"));
+    try expectContent(&ed, "a { color: red; }\n  b { }\n\nc");
+    try testing.expectEqual(Pos{ .line = 0, .col = 4 }, ed.cursor);
+
+    // Cursor at the end of the line stays before the closing marker.
+    ed.setCursor(.{ .line = 0, .col = 17 }, false);
+    try testing.expect(try ed.toggleBlockComment("/*", "*/"));
+    try testing.expectEqual(Pos{ .line = 0, .col = 20 }, ed.cursor);
+    _ = try ed.undo();
+    try expectContent(&ed, "a { color: red; }\n  b { }\n\nc");
+
+    // Several lines: each gets its own pair, the opener in one column, empty
+    // lines stay empty. One Ctrl+Z undoes all of it.
+    ed.selectAll();
+    try testing.expect(try ed.toggleBlockComment("<!--", "-->"));
+    try expectContent(&ed, "<!-- a { color: red; } -->\n<!--   b { } -->\n\n<!-- c -->");
+    try expectCursorValid(&ed);
+    ed.selectAll();
+    try testing.expect(try ed.toggleBlockComment("<!--", "-->"));
+    try expectContent(&ed, "a { color: red; }\n  b { }\n\nc");
+    ed.selectAll();
+    try testing.expect(try ed.toggleBlockComment("<!--", "-->"));
+    _ = try ed.undo();
+    try expectContent(&ed, "a { color: red; }\n  b { }\n\nc");
+
+    // Without spaces inside the markers, too.
+    var tight = try makeEditor("  /*x*/");
+    defer tight.deinit();
+    try testing.expect(try tight.toggleBlockComment("/*", "*/"));
+    try expectContent(&tight, "  x");
+}
+
+test "block comment is not nested" {
+    // Wrapping again would end the comment at the inner "*/".
+    var ed = try makeEditor("a { /* note */ }\nb { }");
+    defer ed.deinit();
+    ed.selectAll();
+    try testing.expect(!try ed.toggleBlockComment("/*", "*/"));
+    try expectContent(&ed, "a { /* note */ }\nb { }");
+    try testing.expectEqual(@as(usize, 0), ed.undo_stack.items.len);
+
+    // Two comments on one line are not one wrapped line: unwrapping them would
+    // leave "a */ b /* c".
+    var two = try makeEditor("/* a */ b /* c */");
+    defer two.deinit();
+    try testing.expect(!try two.toggleBlockComment("/*", "*/"));
+    try expectContent(&two, "/* a */ b /* c */");
+
+    // Mixed selection with one wrapped line also counts as nesting.
+    var mixed = try makeEditor("/* a */\nb");
+    defer mixed.deinit();
+    mixed.selectAll();
+    try testing.expect(!try mixed.toggleBlockComment("/*", "*/"));
+    try expectContent(&mixed, "/* a */\nb");
+}
+
 test "duplicate and move line" {
     var ed = try makeEditor("eins\nzwei\ndrei");
     defer ed.deinit();
@@ -1646,6 +1781,16 @@ test "multi-part edits are all or nothing when memory runs out" {
     try expectAllOrNothing(start, prepSelectAcross, struct {
         fn f(ed: *Editor) anyerror!void {
             try ed.tab();
+        }
+    }.f);
+    try expectAllOrNothing(start, prepSelectAcross, struct {
+        fn f(ed: *Editor) anyerror!void {
+            try testing.expect(try ed.toggleBlockComment("/*", "*/"));
+        }
+    }.f);
+    try expectAllOrNothing("/* eins */\n/* zwei */\n/* drei */", prepSelectAcross, struct {
+        fn f(ed: *Editor) anyerror!void {
+            try testing.expect(try ed.toggleBlockComment("/*", "*/"));
         }
     }.f);
 }

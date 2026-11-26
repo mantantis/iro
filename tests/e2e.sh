@@ -316,10 +316,18 @@ ok "Ctrl+D duplicates the line"    '[ "$(screen | sed -n 2p)" = "  2 eins" ] && 
 keys C-End; keys M-Up; keys M-Up
 ok "Alt+Up moves the line"     '[ "$(screen | sed -n 2p)" = "  2 drei" ]'
 keys C-q; sleep 0.2; keys v; sleep 0.3
-printf 'a { color: red; }\n' > "$E/stil.css"
+printf 'a { color: red; }\nb { /* note */ }\n' > "$E/stil.css"
 start "$E/stil.css"; keys C-k; sleep 0.3
-ok "Ctrl+K leaves CSS valid (no //)" '[ "$(screen | sed -n 1p)" = "  1 a { color: red; }" ] && screen | tail -1 | grep -q "CSS hat keine Zeilenkommentare"'
-keys C-q; sleep 0.3
+ok "Ctrl+K in CSS wraps the line in /* */" '[ "$(screen | sed -n 1p)" = "  1 /* a { color: red; } */" ]'
+keys C-k; sleep 0.3
+ok "Again: block comment removed"   '[ "$(screen | sed -n 1p)" = "  1 a { color: red; }" ]'
+keys Down; keys C-k; sleep 0.3
+ok "Block comments are not nested" '[ "$(screen | sed -n 2p)" = "  2 b { /* note */ }" ] && screen | tail -1 | grep -q "Hier steht schon \*/"'
+keys C-q; sleep 0.2; keys v; sleep 0.3
+printf '<p>hallo</p>\n' > "$E/seite.html"
+start "$E/seite.html"; keys C-k; sleep 0.3
+ok "Ctrl+K in HTML uses <!-- -->"  '[ "$(screen | sed -n 1p)" = "  1 <!-- <p>hallo</p> -->" ]'
+keys C-q; sleep 0.2; keys v; sleep 0.3
 mkdir -p "$E/dotfiles"; printf 'bind = SUPER, Q, exec, kitty\n' > "$E/dotfiles/hyprland.conf"
 start "$E/dotfiles/hyprland.conf"
 ok "hyprland.conf outside the hypr folder is Hyprland" 'screen | tail -1 | grep -q "· *Hyprland *·"'
