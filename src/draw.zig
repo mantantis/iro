@@ -202,7 +202,10 @@ fn drawStartScreen(self: *App, tw: vaxis.Window, arena: Allocator) bool {
     }.f;
 
     const th: u16 = @intCast(self.text_h);
-    const subtitle = ui(self, "色  Instant · Riced · Operator  ·  Zig + Lua  ·  von Mausmann", "色  Instant · Riced · Operator  ·  Zig + Lua  ·  by Mausmann");
+    const long_sub = ui(self, "色  Instant · Riced · Operator  ·  Zig + Lua  ·  von Mausmann", "色  Instant · Riced · Operator  ·  Zig + Lua  ·  by Mausmann");
+    // The author's name stays on screen however narrow it gets (NOTICE.md,
+    // section 3a): rather drop the rest of the line than cut off the name.
+    const subtitle = if (tw.width >= tw.gwidth(long_sub)) long_sub else ui(self, "色  von Mausmann", "色  by Mausmann");
 
     // Case A: real logo via the kitty graphics protocol (at least 6 rows of room).
     const text_rows_a: u16 = 9;
@@ -247,6 +250,8 @@ fn drawStartScreen(self: *App, tw: vaxis.Window, arena: Allocator) bool {
         const hx: u16 = (tw.width -| short_w) / 2;
         const r1 = tw.printSegment(.{ .text = ">_ ", .style = .{ .fg = self.pinkColor(), .bold = true } }, .{ .row_offset = top_y_b, .col_offset = hx, .wrap = .none });
         _ = tw.printSegment(.{ .text = "IRO", .style = .{ .fg = self.accentColor(), .bold = true } }, .{ .row_offset = top_y_b, .col_offset = r1.col, .wrap = .none });
+        // The row between header and shortcuts is free.
+        centerText(tw, top_y_b + 1, subtitle, .{ .dim = true });
     }
     drawFooterAndShortcuts(self, tw, &shortcuts, block_x, max_key_w, top_y_b + 2);
     return false;

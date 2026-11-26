@@ -437,6 +437,12 @@ ok "Start screen appears without a file" 'screen | grep -q "IRO" && screen | gre
 lit 'Hallo'
 ok "Typing hides the start screen" '[ "$(screen | sed -n 1p)" = "  1 Hallo" ] && ! screen | grep -q "Tippe einfach los"'
 keys C-q; sleep 0.2; keys v; sleep 0.3
+# Narrow: the long subtitle does not fit, the author's name must stay.
+t kill-server 2>/dev/null; sleep 0.4
+t new-session -d -x 40 -y 20 "env XDG_STATE_HOME='$XDG_STATE_HOME' XDG_CONFIG_HOME='$XDG_CONFIG_HOME' '$IRO'; sleep 60"
+sleep 2.2
+ok "Narrow start screen still names the author" 'screen | grep -q ">_ IRO .*von Mausmann" && screen | grep -q "Tippe einfach los"'
+keys C-q; sleep 0.3
 
 echo "Help page (Alt+H)"
 t kill-server 2>/dev/null; sleep 0.4
