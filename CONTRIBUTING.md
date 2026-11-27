@@ -49,18 +49,16 @@ Both suites run in CI on every pull request and have to pass.
 
 ## Pull requests
 
-- Fork, branch, and open the pull request against `main`. Only the maintainer
-  merges, and nobody pushes to `main` directly.
-- One fix or feature per pull request. It lands as a single squashed commit.
-- Title in English, short and imperative: "Fix …", "Add …", "Keep …".
-- A fix comes with a test that fails without it, unit or end-to-end.
+- Open pull requests against `main`, one fix or feature each. They are
+  squashed on merge.
+- Titles in English, short and imperative: "Fix …", "Add …".
+- A fix comes with a test that fails without it.
 - User-visible changes get an entry under `[Unreleased]` in
-  [CHANGELOG.md](CHANGELOG.md), written for users, not as a commit log.
-- Every UI text needs both languages, `.{ .de = …, .en = … }` (see
-  `src/lang.zig`). If your German is shaky, say so and it gets polished in review.
-- Match the surrounding style and do not reformat code you did not touch.
-  Comments are in English. New source files start with the same SPDX and
-  copyright header as the existing ones.
+  [CHANGELOG.md](CHANGELOG.md).
+- Every UI text needs German and English (`src/lang.zig`). Shaky German gets
+  polished in review.
+- Keep the surrounding style and don't reformat code you didn't touch. New
+  files get the SPDX header.
 
 ## License
 
