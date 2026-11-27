@@ -211,6 +211,8 @@ zig build test                 # unit tests
 tests/e2e.sh                   # end-to-end run in tmux (~4 minutes)
 ```
 
+Want to help? See [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Credits
 
 Idea & design: **Mausmann**. Built with AI (Claude Code & Antigravity).

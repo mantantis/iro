@@ -226,6 +226,8 @@ zig build test                 # Kerntests
 tests/e2e.sh                   # Probelauf in tmux (~4 Minuten)
 ```
 
+Lust mitzumachen? Siehe [CONTRIBUTING.md](CONTRIBUTING.md) (englisch).
+
 ## Credits
 
 Idee & Design: **Mausmann**. Gebaut mit KI (Claude Code & Antigravity).
