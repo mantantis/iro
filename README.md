@@ -220,7 +220,7 @@ Terminal rendering by [libvaxis](https://github.com/rockorager/libvaxis).
 
 Like iro? Tips go straight into coffee and AI tokens:
 
-<a href="https://ko-fi.com/mausmann" title="Support me on Ko-fi"><img src="assets/kofi.gif" alt="Support me on Ko-fi" height="148"></a>
+<a href="https://ko-fi.com/mausmann" title="Support me on Ko-fi"><img src="assets/kofi.webp" alt="Support me on Ko-fi" height="148"></a>
 
 ## License
 
