@@ -24,7 +24,7 @@ const Cmd = config.Cmd;
 const Key = vaxis.Key;
 const draw_mod = @import("draw.zig");
 
-pub const version = "0.2.0";
+pub const version = "0.3.0";
 pub const logo_png = @embedFile("logo.png");
 
 /// If iro crashes, the terminal is reset first. Otherwise an unusable window

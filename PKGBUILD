@@ -1,6 +1,6 @@
 # Build and install from this folder:  makepkg -si
 pkgname=iro
-pkgver=0.2.0
+pkgver=0.3.0
 pkgrel=1
 pkgdesc="A modeless terminal editor that looks good and never loses your work"
 arch=('x86_64')

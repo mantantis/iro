@@ -6,6 +6,10 @@ All notable changes to iro are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-27
+
+First public release.
+
 ### Added
 - Config Guard: validates known configs (`fstab`, `sudoers`, `sshd_config`,
   `systemd` units, shell scripts, JSON, and JSONC with comments as in VS Code
@@ -51,3 +55,6 @@ All notable changes to iro are documented here. The format follows
   counts toward the step limit.
 - `init.lua` can no longer hang iro: metatables with `__gc` are refused, and a
   config that keeps catching the step limit with `pcall` is stopped.
+
+[Unreleased]: https://github.com/mantantis/iro/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/mantantis/iro/releases/tag/v0.3.0

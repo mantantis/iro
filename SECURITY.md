@@ -10,8 +10,8 @@ a public issue.
 Instead, report it privately:
 
 - **Email:** <mailto:mausmann.dev@proton.me>
-- **GitHub:** via GitHub's *Private vulnerability reporting* once this
-  repository is public.
+- **GitHub:** [report a vulnerability](https://github.com/mantantis/iro/security/advisories/new)
+  (Private vulnerability reporting).
 
 Please include the iro version (`iro --version`), steps to reproduce, and what
 happened. iro is a hobby project maintained by one person, so responses are best
