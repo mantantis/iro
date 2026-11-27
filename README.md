@@ -215,7 +215,7 @@ Want to help? See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Credits
 
-Idea & design: **Mausmann**. Built with AI (Claude Code & Antigravity).
+Idea & design: **Mausmann**. Built with Claude Code & Antigravity.
 Terminal rendering by [libvaxis](https://github.com/rockorager/libvaxis).
 
 <p align="center">

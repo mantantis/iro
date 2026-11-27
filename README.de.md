@@ -230,7 +230,7 @@ Lust mitzumachen? Siehe [CONTRIBUTING.md](CONTRIBUTING.md) (englisch).
 
 ## Credits
 
-Idee & Design: **Mausmann**. Gebaut mit KI (Claude Code & Antigravity).
+Idee & Design: **Mausmann**. Gebaut mit Claude Code & Antigravity.
 Terminal-Darstellung mit [libvaxis](https://github.com/rockorager/libvaxis).
 
 <p align="center">
