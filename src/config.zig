@@ -114,7 +114,7 @@ pub const presets = blk: {
         .git_geaendert = hex("#F9E2AF"),
         .git_weg = hex("#F38BA8"),
     } },
-    .{ .name = "tokyonacht", .theme = .{
+    .{ .name = "tokyonight", .theme = .{
         .akzent = hex("#7AA2F7"),
         .tasten = hex("#BB9AF7"),
         .warnung = hex("#E0AF68"),
@@ -299,8 +299,8 @@ pub const presets = blk: {
         .git_geaendert = hex("#B6FF4D"),
         .git_weg = hex("#FF5C5C"),
     } },
-    // Bernstein (iro original): amber terminal like forty years ago.
-    .{ .name = "bernstein", .theme = .{
+    // Amber (iro original): amber terminal like forty years ago.
+    .{ .name = "amber", .theme = .{
         .text = hex("#FFB347"),
         .akzent = hex("#FFB000"),
         .tasten = hex("#FFD24D"),
@@ -317,6 +317,12 @@ pub const presets = blk: {
         .git_weg = hex("#FF6A3D"),
     } },
 };
+};
+
+/// Earlier theme names that still load, mapped to their current name.
+pub const preset_aliases = [_]struct { old: []const u8, new: []const u8 }{
+    .{ .old = "tokyonacht", .new = "tokyonight" },
+    .{ .old = "bernstein", .new = "amber" },
 };
 
 /// All names for messages and the template: "terminal, mohawk, …".
@@ -1246,7 +1252,10 @@ pub const Config = struct {
         if (tp != LUA_TSTRING) return self.setErr(gpa, "'theme' (thema) muss ein Name in Anführungszeichen sein", "'theme' must be a name in quotes", .{});
         var len: usize = 0;
         const ptr = lua_tolstring(L, -1, &len) orelse return;
-        const name = std.mem.trim(u8, ptr[0..len], " \t");
+        var name = std.mem.trim(u8, ptr[0..len], " \t");
+        for (preset_aliases) |a| {
+            if (std.ascii.eqlIgnoreCase(a.old, name)) name = a.new;
+        }
         for (presets) |p| {
             if (std.ascii.eqlIgnoreCase(p.name, name)) {
                 self.theme = p.theme;
@@ -1419,9 +1428,9 @@ pub const default_init_lua_de =
     \\-- esc_menu = true        -- Esc holt das Hauptmenü (wenn nichts anderes aufzuheben ist)
     \\
     \\-- Fertiger Farbsatz. "terminal" nimmt die Farben deines Terminals und folgt
-    \\-- damit dem Wallpaper. Sonst: "mohawk", "nord", "gruvbox", "catppuccin", "tokyonacht",
+    \\-- damit dem Wallpaper. Sonst: "mohawk", "nord", "gruvbox", "catppuccin", "tokyonight",
     \\-- "dracula", "rosepine", "kanagawa", "everforest", "onedark", "solarized", "monokai",
-    \\-- "ayu", "synthwave" und die iro-eigenen Retro-Sätze "phosphor" (grün) und "bernstein" (amber).
+    \\-- "ayu", "synthwave" und die iro-eigenen Retro-Sätze "phosphor" (grün) und "amber" (bernstein).
     \\-- Am bequemsten durchprobieren: Esc → Einstellungen → Farbsatz, mit ←/→.
     \\-- theme = "terminal"
     \\
@@ -1523,9 +1532,9 @@ pub const default_init_lua_en =
     \\-- esc_menu = true        -- Esc opens the main menu (when there's nothing else to cancel)
     \\
     \\-- Ready-made color scheme. "terminal" uses your terminal's colors and so
-    \\-- follows your wallpaper. Others: "mohawk", "nord", "gruvbox", "catppuccin", "tokyonacht",
+    \\-- follows your wallpaper. Others: "mohawk", "nord", "gruvbox", "catppuccin", "tokyonight",
     \\-- "dracula", "rosepine", "kanagawa", "everforest", "onedark", "solarized", "monokai",
-    \\-- "ayu", "synthwave" and iro's own retro schemes "phosphor" (green) and "bernstein" (amber).
+    \\-- "ayu", "synthwave" and iro's own retro schemes "phosphor" (green) and "amber".
     \\-- Easiest to try: Esc → Settings → Color scheme, with ←/→.
     \\-- theme = "terminal"
     \\

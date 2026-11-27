@@ -448,7 +448,7 @@ test "page: every command has a key entry, headings are not selectable" {
 
 test "theme and indentation cycle around" {
     try std.testing.expectEqualStrings("mohawk", cycleTheme("terminal", 1));
-    try std.testing.expectEqualStrings("bernstein", cycleTheme("terminal", -1));
+    try std.testing.expectEqualStrings("amber", cycleTheme("terminal", -1));
     try std.testing.expectEqual(@as(?bool, true), cycleIndent(null, 1));
     try std.testing.expectEqual(@as(?bool, null), cycleIndent(false, 1));
     try std.testing.expectEqual(@as(?config.Gear, .blade), cycleGear(null, 1));
@@ -551,6 +551,20 @@ test "every theme loads by name, retro themes colour the text too" {
     defer cfg.deinit(gpa);
     try std.testing.expect(cfg.theme.text != .default);
     try std.testing.expect(theme_names.len >= 17);
+}
+
+test "earlier theme names still load under their current name" {
+    const gpa = std.testing.allocator;
+    const cases = [_][2][]const u8{
+        .{ "thema = \"bernstein\"", "amber" },
+        .{ "theme = \"TokyoNacht\"", "tokyonight" },
+    };
+    for (cases) |c| {
+        var cfg = try config.Config.loadFromSlice(gpa, c[0]);
+        defer cfg.deinit(gpa);
+        try std.testing.expect(cfg.err_msg == null);
+        try std.testing.expectEqualStrings(c[1], cfg.theme_name);
+    }
 }
 
 test "mouse wheel scrolls the settings list instead of snapping back" {
