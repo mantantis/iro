@@ -124,7 +124,7 @@ bleiben in beiden Gängen gleich.
 
 - **Rund 2 MB** Programmgröße (gestrippt, Logo inklusive). Zur Laufzeit nötig:
   libc und Lua.
-- **Rund 7 MB RAM** mit einer offenen Quelldatei von 4000 Zeilen.
+- **Unter 5 MB RAM** mit einer offenen Quelldatei von 4000 Zeilen.
 - **Dateisuche über ~350 000 Dateien in 40–75 ms** (warmer Cache), im Hintergrund
   auf allen Kernen eingelesen, mit Tippfehler-Toleranz. `hyprlnad` findet
   trotzdem `hyprland.lua`.
@@ -223,7 +223,7 @@ kommentierte an. Änderungen gelten beim Speichern.
 ```sh
 zig build                      # baut zig-out/bin/iro
 zig build test                 # Kerntests
-tests/e2e.sh                   # Probelauf in tmux (~4 Minuten)
+zig build && tests/e2e.sh      # Probelauf in tmux (~4 Minuten)
 ```
 
 Lust mitzumachen? Siehe [CONTRIBUTING.md](CONTRIBUTING.md) (englisch).
@@ -233,9 +233,9 @@ Lust mitzumachen? Siehe [CONTRIBUTING.md](CONTRIBUTING.md) (englisch).
 Idee & Design: **Mausmann**. Gebaut mit KI (Claude Code & Antigravity).
 Terminal-Darstellung mit [libvaxis](https://github.com/rockorager/libvaxis).
 
-Gefällt dir iro? Trinkgeld fließt direkt in Kaffee und KI-Tokens:
-
-<a href="https://ko-fi.com/mausmann" title="Support me on Ko-fi"><img src="assets/kofi.webp" alt="Support me on Ko-fi" height="148"></a>
+<p align="center">
+  <a href="https://ko-fi.com/mausmann" title="Spendier mir einen Kaffee auf Ko-fi"><img src="assets/kofi-top.de.svg" alt="Gefällt dir iro? Spendier mir einen Kaffee auf Ko-fi"><br><img src="assets/kofi.webp" alt="iro-Maskottchen: eine Punk-Maus mit Kaffeetasse" height="148"><br><img src="assets/kofi-bottom.de.svg" alt="Geht direkt in Kaffee und KI-Tokens."></a>
+</p>
 
 ## Lizenz
 

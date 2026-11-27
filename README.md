@@ -39,7 +39,7 @@ You open a file and type. There are no modes to learn and no plugin manager to
 feed. Ctrl+S saves, Ctrl+Q quits, the mouse just works, and everything else is
 one keystroke or one menu away.
 
-*The name:* **色** (*iro*) is Japanese for “colour, style”, a fitting word for a riced editor.
+*The name:* **色** (*iro*) is Japanese for “color, style”, a fitting word for a riced editor.
 
 ### What iro is not
 
@@ -67,7 +67,7 @@ Alt+G switches at any time, and the keys never change between gears.
 ### 🎨 Riced by default, quiet when it matters
 
 - **Follows your wallpaper.** iro reads the terminal's own palette, so when your
-  wallpaper tool recolours the terminal, iro recolours with it. Live.
+  wallpaper tool recolors the terminal, iro recolors with it. Live.
 - **16 built-in themes** if you prefer a fixed look, including two retro ones
   (green phosphor and amber CRT).
 - Cursor line, git gutter, indent guides, bracket pairs, a **Braille minimap**,
@@ -115,7 +115,7 @@ Alt+G switches at any time, and the keys never change between gears.
 ### ⚡ Small and fast
 
 - **About 2 MB** stripped binary, logo included. Runtime dependencies: libc and Lua.
-- **About 7 MB of RAM** with a 4,000-line source file open.
+- **Under 5 MB of RAM** with a 4,000-line source file open.
 - **File search across ~350,000 files in 40–75 ms** (warm cache), indexed in the
   background on all cores, with typo tolerance. `hyprlnad` still finds `hyprland.lua`.
 
@@ -132,7 +132,7 @@ nothing to install, nothing to update, no config archaeology after a year away.
 - **Navigation:** clickable file tree with create/rename/trash, command palette with
   fuzzy search, project-aware file search (Ctrl+O, press again for your whole
   home), folder jumps via zoxide.
-- **Syntax colours for 29 languages,** from Shell, Hyprland and kitty configs to
+- **Syntax colors for 29 languages,** from Shell, Hyprland and kitty configs to
   Zig, Rust, C/C++, Python, Go, JS/TS, Lua, Nix and Markdown.
 - **Point-and-click settings page** (Esc → Settings) with live theme preview, or
   plain Lua in `init.lua` if you prefer text.
@@ -208,7 +208,7 @@ Changes apply on save.
 ```sh
 zig build                      # build zig-out/bin/iro
 zig build test                 # unit tests
-tests/e2e.sh                   # end-to-end run in tmux (~4 minutes)
+zig build && tests/e2e.sh      # end-to-end run in tmux (~4 minutes)
 ```
 
 Want to help? See [CONTRIBUTING.md](CONTRIBUTING.md).
@@ -218,9 +218,9 @@ Want to help? See [CONTRIBUTING.md](CONTRIBUTING.md).
 Idea & design: **Mausmann**. Built with AI (Claude Code & Antigravity).
 Terminal rendering by [libvaxis](https://github.com/rockorager/libvaxis).
 
-Like iro? Tips go straight into coffee and AI tokens:
-
-<a href="https://ko-fi.com/mausmann" title="Support me on Ko-fi"><img src="assets/kofi.webp" alt="Support me on Ko-fi" height="148"></a>
+<p align="center">
+  <a href="https://ko-fi.com/mausmann" title="Buy me a coffee on Ko-fi"><img src="assets/kofi-top.en.svg" alt="Like iro? Buy me a coffee on Ko-fi"><br><img src="assets/kofi.webp" alt="iro mascot: a punk mouse with a coffee mug" height="148"><br><img src="assets/kofi-bottom.en.svg" alt="It goes straight into coffee and AI tokens."></a>
+</p>
 
 ## License
 
