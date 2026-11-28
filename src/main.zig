@@ -1322,6 +1322,7 @@ pub const App = struct {
         };
         self.save_ok = true;
         self.d.ed.markSaved();
+        self.rememberRecent(path);
         // Maybe something was committed elsewhere in the meantime.
         self.loadGitBase(self.d);
         self.removeSwap(self.d);
@@ -2623,6 +2624,7 @@ pub const App = struct {
     /// Remembers an opened file (newest first, at most 100) and writes the list
     /// to ~/.local/state/iro/zuletzt.
     fn rememberRecent(self: *App, path: []const u8) void {
+        if (self.recent.items.len > 0 and std.mem.eql(u8, self.recent.items[0], path)) return;
         const gpa = self.gpa;
         for (self.recent.items, 0..) |r, i| {
             if (std.mem.eql(u8, r, path)) {

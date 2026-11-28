@@ -8,6 +8,7 @@ All notable changes to iro are documented here. The format follows
 
 ### Fixed
 - The status bar now shortens its right side step by step on narrow terminals instead of hiding the cursor position.
+- Saving a new file or using "Save as" now adds it to the recent-files list.
 
 ## [0.3.0] - 2026-11-27
 

@@ -64,6 +64,7 @@ keys C-BSpace 2>/dev/null; for i in $(seq 1 120); do t send-keys BSpace; done; s
 lit "$E/kopie.txt"; keys Enter; sleep 0.3
 ok "Copy was created"       'cmp -s "$F" "$E/kopie.txt"'
 ok "Name in the bar changed" 'screen | tail -1 | grep -q "kopie.txt"'
+ok "Save as adds the new file to recent" 'grep -Fxq "$E/kopie.txt" "$XDG_STATE_HOME/iro/zuletzt"'
 keys C-q; sleep 0.3
 
 echo "Hard kill and recovery"
