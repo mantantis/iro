@@ -370,7 +370,7 @@ pub fn writeAtomicMode(io: Io, dir: Io.Dir, path: []const u8, bytes: []const u8,
     const owner_kept = if (old_owner) |o| keepOwner(file.handle, o) else true;
     // The new file gets the same mode as the old one. New files get what the
     // shell would give them (default minus umask).
-    const mode_kept = owner_kept and if (file.setPermissions(io, wanted orelse defaultFilePermissions())) true else |_| false;
+    const mode_kept = owner_kept and if (file.setPermissions(io, wanted orelse defaultFilePermissions(io))) true else |_| false;
     if (!mode_kept or (old_stat != null and !copyXattrs(io, dir, target, file.handle))) {
         // The new file cannot look like the old one (someone else's file, a
         // group we are not in, a mode or attribute that cannot be set).
@@ -403,12 +403,34 @@ pub fn sameFile(fd: linux.fd_t, path: [*:0]const u8) bool {
 }
 
 /// The mode a newly created file usually gets.
-fn defaultFilePermissions() Io.File.Permissions {
+fn defaultFilePermissions(io: Io) Io.File.Permissions {
     if (@import("builtin").os.tag != .linux) return .default_file;
-    // The umask can only be read by setting it and restoring it.
-    const mask = linux.syscall1(.umask, 0o077);
-    _ = linux.syscall1(.umask, mask);
+    const mask: usize = readProcUmask(io) orelse blk: {
+        // Fallback if /proc is unavailable: set and restore.
+        const m = linux.syscall1(.umask, 0o077);
+        _ = linux.syscall1(.umask, m);
+        break :blk m;
+    };
     return .fromMode(@intCast(0o666 & ~mask));
+}
+
+/// Reads the process umask from /proc/self/status without changing it.
+fn readProcUmask(io: Io) ?u32 {
+    var buf: [8192]u8 = undefined;
+    const raw = Io.Dir.cwd().readFile(io, "/proc/self/status", &buf) catch return null;
+    return parseProcUmask(raw);
+}
+
+fn parseProcUmask(raw: []const u8) ?u32 {
+    var lines = std.mem.splitScalar(u8, raw, '\n');
+    while (lines.next()) |line| {
+        const rest = if (std.mem.startsWith(u8, line, "Umask:")) line["Umask:".len..] else continue;
+        const trimmed = std.mem.trim(u8, rest, " \t\r");
+        if (trimmed.len == 0) return null;
+        const mask = std.fmt.parseInt(u32, trimmed, 8) catch return null;
+        return if (mask <= 0o777) mask else null;
+    }
+    return null;
 }
 
 /// Everything about a file that replacing it by rename would silently change.
@@ -633,7 +655,22 @@ test "permissions: protected file stays protected, new file follows umask" {
     // An ordinary new file is not suddenly owner-only.
     try writeAtomic(io, tmp.dir, "normal.txt", "abc\n");
     const s3 = try tmp.dir.statFile(io, "normal.txt", .{});
-    try testing.expectEqual(defaultFilePermissions().toMode() & 0o777, s3.permissions.toMode() & 0o777);
+    try testing.expectEqual(defaultFilePermissions(io).toMode() & 0o777, s3.permissions.toMode() & 0o777);
+}
+
+test "umask is read from /proc/self/status" {
+    try testing.expectEqual(@as(?u32, 0o022), parseProcUmask("Name:\tiro\nUmask:\t0022\nState:\tR\n"));
+    try testing.expectEqual(@as(?u32, 0o077), parseProcUmask("Umask:\t0077\n"));
+    try testing.expectEqual(@as(?u32, null), parseProcUmask("Name:\tiro\nState:\tR\n"));
+    try testing.expectEqual(@as(?u32, null), parseProcUmask("Umask:\tnope\n"));
+    try testing.expectEqual(@as(?u32, null), parseProcUmask("Umask:\t1000\n"));
+
+    if (@import("builtin").os.tag == .linux) {
+        const got = readProcUmask(testing.io) orelse return error.TestUnexpectedResult;
+        const live = linux.syscall1(.umask, got);
+        _ = linux.syscall1(.umask, live);
+        try testing.expectEqual(@as(u32, @intCast(live)), got);
+    }
 }
 
 test "symlink stays a symlink" {
