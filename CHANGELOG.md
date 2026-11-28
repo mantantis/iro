@@ -6,6 +6,9 @@ All notable changes to iro are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- The status bar now shortens its right side step by step on narrow terminals instead of hiding the cursor position.
+
 ## [0.3.0] - 2026-11-27
 
 First public release.

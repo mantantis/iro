@@ -1691,19 +1691,32 @@ fn drawStatus(self: *App, win: vaxis.Window, arena: Allocator) void {
     }
 
     const dcol = text.displayCol(ed.buf.line(ed.cursor.line), ed.cursor.col, ed.tab_width);
-    const right = if (self.focus == .tree and self.hints_h == 0)
-        ui(self, "Enter öffnen · ←→ auf/zu · Rücktaste hoch · . Versteckte · Esc zum Text ", "Enter open · ←→ expand · Backspace up · . hidden · Esc to text ")
-    else
-        fmtL(self, arena, "Zeile {d}, Spalte {d}  ·  {s}  ·  {s}  ·  {s} ", "Ln {d}, Col {d}  ·  {s}  ·  {s}  ·  {s} ", .{
-            ed.cursor.line + 1,
-            dcol + 1,
-            if (self.d.lang) |lang| lang.name else "Text",
-            if (ed.soft_tabs) ui(self, "Leerzeichen", "Spaces") else "Tabs",
-            if (self.d.meta.eol == .crlf) "CRLF" else "LF",
-        });
-    const rw = win.gwidth(right);
-    if (x + rw + 2 < win.width) {
-        var rx: u16 = win.width - rw;
-        put(win, &rx, y, right, .{ .dim = true });
+    const line_no = ed.cursor.line + 1;
+    const col_no = dcol + 1;
+    const lang_name = if (self.d.lang) |lang| lang.name else "Text";
+    const right: ?[]const u8 = if (self.focus == .tree and self.hints_h == 0) blk: {
+        const s = ui(self, "Enter öffnen · ←→ auf/zu · Rücktaste hoch · . Versteckte · Esc zum Text ", "Enter open · ←→ expand · Backspace up · . hidden · Esc to text ");
+        break :blk if (@as(usize, x) + win.gwidth(s) + 2 <= win.width) s else null;
+    } else blk: {
+        const candidates = [_][]const u8{
+            fmtL(self, arena, "Zeile {d}, Spalte {d}  ·  {s}  ·  {s}  ·  {s} ", "Ln {d}, Col {d}  ·  {s}  ·  {s}  ·  {s} ", .{
+                line_no,
+                col_no,
+                lang_name,
+                if (ed.soft_tabs) ui(self, "Leerzeichen", "Spaces") else "Tabs",
+                if (self.d.meta.eol == .crlf) "CRLF" else "LF",
+            }),
+            fmtL(self, arena, "Zeile {d}, Spalte {d}  ·  {s} ", "Ln {d}, Col {d}  ·  {s} ", .{ line_no, col_no, lang_name }),
+            fmtL(self, arena, "Zeile {d}, Spalte {d} ", "Ln {d}, Col {d} ", .{ line_no, col_no }),
+            std.fmt.allocPrint(arena, "{d}:{d} ", .{ line_no, col_no }) catch "",
+        };
+        for (candidates) |c| {
+            if (c.len > 0 and @as(usize, x) + win.gwidth(c) + 2 <= win.width) break :blk c;
+        }
+        break :blk null;
+    };
+    if (right) |r| {
+        var rx: u16 = win.width - win.gwidth(r);
+        put(win, &rx, y, r, .{ .dim = true });
     }
 }

@@ -839,6 +839,14 @@ start "$E/long.json"
 keys End; keys C-Left; keys C-Left; sleep 1.5
 ok "Ctrl+Left crosses it back at once"        'screen | tail -1 | grep -q "Spalte 10 "'
 keys C-q; sleep 0.3
+# On an 80-column terminal the full right block no longer fits with a long column
+# number; it shortens instead of vanishing completely.
+t kill-server 2>/dev/null; sleep 0.4
+t new-session -d -x 80 -y 10 "env XDG_STATE_HOME='$XDG_STATE_HOME' XDG_CONFIG_HOME='$XDG_CONFIG_HOME' '$IRO' '$E/long.json'; sleep 60"; sleep 2.2
+for _ in 1 2 3 4 5 6 7 8 9; do keys Right; done
+keys C-Right; sleep 1.5
+ok "80-column status bar keeps cursor position" 'screen | tail -1 | grep -q "Spalte 200010"'
+keys C-q; sleep 0.3
 
 echo
 if [ "$fails" -eq 0 ]; then echo "All checks passed."; else echo "$fails check(s) failed."; exit 1; fi
