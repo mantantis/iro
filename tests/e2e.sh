@@ -534,6 +534,15 @@ keys c; sleep 0.3
 ok "C cancels"                     '! screen | tail -1 | grep -qF "[D]iscard"'
 keys C-q; sleep 0.2; keys d; sleep 0.5
 ok "D discards, file unchanged"   '[ "$(head -1 "$E/minimap.txt")" = "Zeile 1 mit Inhalt für die Minimap" ]'
+printf '{"ok": true}\n' > "$E/en-guard.json"
+EXTRA_ENV="LANG=en_US.UTF-8" start "$E/en-guard.json"
+keys End; lit ' broken'; keys C-s; sleep 0.3
+ok "LANG=en: Config Guard prompt appears" 'screen | tail -1 | grep -qF "[Y]es, save anyway"'
+keys a; sleep 0.2
+ok "A does not cancel English confirmation" 'screen | tail -1 | grep -qF "[Y]es, save anyway"'
+keys c; sleep 0.2
+ok "C cancels English confirmation" '! screen | tail -1 | grep -qF "[Y]es, save anyway"'
+keys C-q; sleep 0.2; keys d; sleep 0.3
 mkdir -p "$XDG_CONFIG_HOME/iro"; printf 'language = "de"\n' > "$XDG_CONFIG_HOME/iro/init.lua"
 EXTRA_ENV="LANG=en_US.UTF-8" start "$E/minimap.txt"
 ok "language = de beats LANG"      'screen | tail -1 | grep -q "Zeile 1, Spalte 1"'

@@ -515,6 +515,11 @@ pub const App = struct {
         return letter(key, if (self.lang == .en) 'd' else 'v');
     }
 
+    /// "Cancel": A in German, C in English.
+    fn cancel(self: *const App, key: vaxis.Key) bool {
+        return letter(key, if (self.lang == .en) 'c' else 'a');
+    }
+
     /// A letter answering a question. The questions show it in capitals, so
     /// Shift and Caps Lock count as well; with Ctrl, Alt or Super it is a
     /// shortcut, not an answer.
@@ -3386,7 +3391,7 @@ pub const App = struct {
                         self.closeCurrent();
                         if (quit) self.requestQuit();
                     }
-                } else if (cp == Key.escape or letter(key, if (self.lang == .en) 'c' else 'a')) {
+                } else if (cp == Key.escape or self.cancel(key)) {
                     self.closePrompt();
                 }
                 return;
@@ -3395,7 +3400,7 @@ pub const App = struct {
                 if (self.yes(key)) {
                     self.closePrompt();
                     self.treeTrash();
-                } else if (cp == Key.escape or letter(key, 'n') or letter(key, 'a')) {
+                } else if (cp == Key.escape or letter(key, 'n') or self.cancel(key)) {
                     self.closePrompt();
                 }
                 return;
@@ -3420,7 +3425,7 @@ pub const App = struct {
                     const overwrite = self.guard_overwrite;
                     self.closePrompt();
                     self.save(.{ .overwrite = overwrite, .guard_ok = true });
-                } else if (cp == Key.escape or letter(key, 'n') or letter(key, 'a')) {
+                } else if (cp == Key.escape or letter(key, 'n') or self.cancel(key)) {
                     self.closePrompt();
                     self.after_save = .stay;
                 }
@@ -3453,7 +3458,7 @@ pub const App = struct {
                     self.pending_save_as = null;
                     self.closePrompt();
                     self.saveAs(path);
-                } else if (cp == Key.escape or letter(key, 'n') or letter(key, 'a')) {
+                } else if (cp == Key.escape or letter(key, 'n') or self.cancel(key)) {
                     self.closePrompt();
                     self.after_save = .stay;
                 }
