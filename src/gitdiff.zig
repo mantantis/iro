@@ -27,6 +27,10 @@ pub const Mark = enum(u8) {
 /// Upper limit of cells for the comparison table (4 bytes each).
 const max_cells = 1_000_000;
 
+fn exceedsCellLimit(a_len: usize, b_len: usize) bool {
+    return b_len > 0 and a_len > max_cells / b_len;
+}
+
 /// Splits file content into lines the way iro counts them: without line endings
 /// and without the empty "line" after the final newline. The slices point into
 /// `raw`.
@@ -59,7 +63,7 @@ pub fn marks(gpa: Allocator, old: []const []const u8, new: []const []const u8, o
     if (a.len == 0 and b.len == 0) return;
     if (a.len == 0) return @memset(out[pre..][0..b.len], .added);
     if (b.len == 0) return markDeletion(out, pre);
-    if (a.len * b.len > max_cells) return @memset(out[pre..][0..b.len], .changed);
+    if (exceedsCellLimit(a.len, b.len)) return @memset(out[pre..][0..b.len], .changed);
 
     // lcs[i][j]: length of the longest common subsequence of a[i..] and b[j..].
     const w = b.len + 1;
@@ -193,4 +197,13 @@ test "random test: marks always match the line count, equal lines stay unmarked"
         try marks(gpa, new[0..m], new[0..m], out[0..m]);
         for (out[0..m]) |mk| try testing.expectEqual(Mark.none, mk);
     }
+}
+
+test "cell limit check does not overflow on huge inputs" {
+    try testing.expect(!exceedsCellLimit(1000, 1000));
+    try testing.expect(exceedsCellLimit(1001, 1000));
+    try testing.expect(exceedsCellLimit(1000, 1001));
+    try testing.expect(exceedsCellLimit(std.math.maxInt(usize), 2));
+    try testing.expect(exceedsCellLimit(2, std.math.maxInt(usize)));
+    try testing.expect(exceedsCellLimit(std.math.maxInt(usize), std.math.maxInt(usize)));
 }
